@@ -7,6 +7,8 @@ import git
 from pathlib import Path
 import json
 import uuid
+from llm_reasoning import LLMReasoningEngine
+import logging
 
 app = Flask(__name__)
 
@@ -15,6 +17,23 @@ CODEQL_QUERIES_PATH = "/opt/security-scanner/codeql-queries"
 # New persistent directory for storing analysis files
 DATA_DIR = "/data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Add environment variable for LLM API key
+LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
+LLM_MODEL = os.environ.get('LLM_MODEL', 'gpt-4')
+LLM_API_BASE = os.environ.get('LLM_API_BASE', None)
+
+# Initialize LLM reasoning engine if API key is provided
+llm_engine = None
+if LLM_API_KEY:
+    llm_engine = LLMReasoningEngine(LLM_API_KEY, LLM_MODEL, LLM_API_BASE)
+    logger.info(f"LLM reasoning engine initialized with model: {LLM_MODEL}")
+else:
+    logger.warning("LLM_API_KEY not provided. LLM reasoning will be disabled.")
 
 def detect_all_languages(repo_path):
     """
@@ -155,6 +174,20 @@ def run_codeql_analysis(repo_path, language, repo_url=None):
                 }
                 results = [r for r in results if r.get('ruleId') in critical_rules]
 
+            # Add LLM reasoning to findings if enabled
+            if llm_engine and results:
+                logger.info(f"Enhancing {len(results)} CodeQL findings with LLM reasoning")
+                enhanced_results = []
+                for finding in results:
+                    try:
+                        enhanced_finding = llm_engine.analyze_codeql_finding(finding, repo_path)
+                        enhanced_results.append(enhanced_finding)
+                    except Exception as e:
+                        logger.error(f"Error enhancing finding with LLM: {str(e)}")
+                        finding['llm_analysis'] = {"error": str(e)}
+                        enhanced_results.append(finding)
+                results = enhanced_results
+
             # Save a permanent copy of the SARIF file
             unique_filename = f"results_{language}_{uuid.uuid4().hex}.sarif"
             permanent_path = os.path.join(DATA_DIR, unique_filename)
@@ -169,6 +202,73 @@ def run_codeql_analysis(repo_path, language, repo_url=None):
 
         except subprocess.CalledProcessError as e:
             return {'error': f'CodeQL analysis failed for {language}: {str(e)}'}
+
+def run_dependency_check(repo_path):
+    """
+    Run OWASP Dependency-Check on the repository and return results.
+    """
+    try:
+        # Create a unique output directory for this scan
+        output_dir = os.path.join(DATA_DIR, f"depcheck_{uuid.uuid4().hex}")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Output files
+        json_report = os.path.join(output_dir, "dependency-check-report.json")
+        html_report = os.path.join(output_dir, "dependency-check-report.html")
+        
+        # Run dependency-check
+        subprocess.run([
+            'dependency-check',
+            '--scan', repo_path,
+            '--format', 'JSON',
+            '--format', 'HTML',
+            '--out', output_dir,
+            '--enableExperimental'
+        ], check=True)
+        
+        # Read and parse the JSON results
+        with open(json_report, 'r') as f:
+            results = json.load(f)
+            
+        # Add LLM reasoning to dependency findings if enabled
+        if llm_engine and 'results' in results:
+            dependencies = results.get('results', {}).get('dependencies', [])
+            if dependencies:
+                logger.info(f"Enhancing dependency findings with LLM reasoning")
+                for dependency in dependencies:
+                    if dependency.get('vulnerabilities'):
+                        for vuln in dependency.get('vulnerabilities', []):
+                            try:
+                                # Create a simplified finding object for the LLM engine
+                                finding = {
+                                    'dependency_name': dependency.get('fileName', ''),
+                                    'dependency_version': dependency.get('version', ''),
+                                    'vulnerability_id': vuln.get('name', ''),
+                                    'description': vuln.get('description', ''),
+                                    'severity': vuln.get('severity', ''),
+                                    'cvss_score': vuln.get('cvssv3', {}).get('baseScore', 0.0)
+                                }
+                                
+                                # Enhance with LLM reasoning
+                                enhanced_finding = llm_engine.analyze_dependency_finding(finding, repo_path)
+                                
+                                # Add the LLM analysis back to the original vulnerability
+                                vuln['llm_analysis'] = enhanced_finding.get('llm_analysis', {})
+                                
+                            except Exception as e:
+                                logger.error(f"Error enhancing dependency finding with LLM: {str(e)}")
+                                vuln['llm_analysis'] = {"error": str(e)}
+        
+        return {
+            'success': True,
+            'results': results,
+            'json_report': json_report,
+            'html_report': html_report
+        }
+    except subprocess.CalledProcessError as e:
+        return {'error': f'Dependency-Check analysis failed: {str(e)}'}
+    except Exception as e:
+        return {'error': f'Dependency-Check processing failed: {str(e)}'}
 
 @app.route('/analyze', methods=['POST'])
 def analyze_repo():
@@ -217,6 +317,15 @@ def analyze_repo():
                 combined_results.extend(analysis.get('results', []))
                 if 'saved_analysis_file' in analysis:
                     saved_files.append(analysis['saved_analysis_file'])
+            
+            # Run OWASP Dependency-Check
+            dependency_check_results = run_dependency_check(temp_dir)
+            
+            # Check for errors in dependency check
+            if 'error' in dependency_check_results:
+                return jsonify({
+                    'error': dependency_check_results['error']
+                }), 400
 
             return jsonify({
                 'repository': github_url,
@@ -224,6 +333,13 @@ def analyze_repo():
                 'analysis_results': {
                     'results': combined_results,
                     'saved_analysis_files': saved_files
+                },
+                'dependency_check': {
+                    'results': dependency_check_results.get('results', {}),
+                    'reports': {
+                        'json': dependency_check_results.get('json_report'),
+                        'html': dependency_check_results.get('html_report')
+                    }
                 }
             })
 
