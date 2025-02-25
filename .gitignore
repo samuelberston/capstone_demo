@@ -1,0 +1,9 @@
+.terraform
+.terraform.*
+.env
+terraform.tfvars
+terraform.tfstate
+terraform.tfstate.backup
+security_scanner.pem
+*.pem
+infrastructure/terraform/security_scanner.pem
