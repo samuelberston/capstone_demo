@@ -1,1 +1,1 @@
-Generic single-database configuration.
+psql -h localhost -U samuelberston -d security_scan_db

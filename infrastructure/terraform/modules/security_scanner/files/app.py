@@ -208,6 +208,27 @@ def run_dependency_check(repo_path):
     Run OWASP Dependency-Check on the repository and return results.
     """
     try:
+        # Install dependencies based on project type
+        if os.path.exists(os.path.join(repo_path, 'package.json')):
+            logger.info("Detected Node.js project, installing dependencies...")
+            subprocess.run(['npm', 'install', '--package-lock-only'], 
+                         cwd=repo_path, check=True)
+        
+        if os.path.exists(os.path.join(repo_path, 'requirements.txt')):
+            logger.info("Detected Python project, installing dependencies...")
+            subprocess.run(['pip', 'install', '-r', 'requirements.txt'],
+                         cwd=repo_path, check=True)
+        
+        if os.path.exists(os.path.join(repo_path, 'pom.xml')):
+            logger.info("Detected Maven project, installing dependencies...")
+            subprocess.run(['mvn', 'dependency:resolve'],
+                         cwd=repo_path, check=True)
+        
+        if os.path.exists(os.path.join(repo_path, 'build.gradle')):
+            logger.info("Detected Gradle project, installing dependencies...")
+            subprocess.run(['gradle', 'dependencies'],
+                         cwd=repo_path, check=True)
+
         # Create a unique output directory for this scan
         output_dir = os.path.join(DATA_DIR, f"depcheck_{uuid.uuid4().hex}")
         os.makedirs(output_dir, exist_ok=True)

@@ -11,7 +11,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 class SecurityScannerClient:
-    def __init__(self, api_url, db_url="sqlite:///security_scans.db"):
+    # Update to postgresql
+    def __init__(self, api_url, db_url="postgresql://samuelberston@localhost/security_scan_db"):
         """
         Initialize the security scanner client.
         
