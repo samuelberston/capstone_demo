@@ -42,7 +42,7 @@ const dummyData: Scan[] = [
     repository_url: "https://github.com/juice-shop/juice-shop",
     branch: "main",
     commit_hash: "9e4b255",
-    scan_date: new Date(Date.now() - 86400000).toISOString(),
+    scan_date: "2023-06-15T10:30:00Z",
     status: "completed",
     codeql_findings: [
       {
@@ -316,7 +316,9 @@ export default function Dashboard() {
               </p>
               <p className="text-sm text-gray-600">
                 <span className="inline-block w-20">Scanned:</span>
-                {new Date(scan.scan_date).toLocaleDateString()}
+                <span suppressHydrationWarning>
+                  {new Date(scan.scan_date).toLocaleDateString()}
+                </span>
               </p>
             </div>
             <div className="mt-4 flex gap-3">
