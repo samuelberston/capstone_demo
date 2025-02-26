@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Toaster, toast } from 'react-hot-toast'
 
 interface Scan {
@@ -111,6 +111,11 @@ export default function Dashboard() {
       dependency: true
     }
   })
+  const [isMounted, setIsMounted] = useState(false)
+  
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   const getPriorityLevel = (priority: string): string => {
     if (priority.toLowerCase().includes('high')) return 'High'
@@ -167,6 +172,13 @@ export default function Dashboard() {
 
   const handleFindingClick = (index: number) => {
     setExpandedFinding(expandedFinding === index ? null : index)
+  }
+
+  const formatDate = (dateString: string) => {
+    if (!isMounted) {
+      return dateString;
+    }
+    return new Date(dateString).toLocaleDateString();
   }
 
   return (
@@ -316,9 +328,9 @@ export default function Dashboard() {
               </p>
               <p className="text-sm text-gray-600">
                 <span className="inline-block w-20">Scanned:</span>
-                <span suppressHydrationWarning>
-                  {new Date(scan.scan_date).toLocaleDateString()}
-                </span>
+                <time dateTime={scan.scan_date}>
+                  {formatDate(scan.scan_date)}
+                </time>
               </p>
             </div>
             <div className="mt-4 flex gap-3">
