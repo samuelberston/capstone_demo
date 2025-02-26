@@ -120,16 +120,6 @@ export default function Dashboard() {
     return 'Medium'
   }
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity.toUpperCase()) {
-      case 'CRITICAL': return 'bg-red-100 text-red-800'
-      case 'HIGH': return 'bg-red-100 text-red-800'
-      case 'MEDIUM': return 'bg-yellow-100 text-yellow-800'
-      case 'LOW': return 'bg-blue-100 text-blue-800'
-      default: return 'bg-gray-100 text-gray-800'
-    }
-  }
-
   const getVerificationColor = (verification: string): string => {
     if (verification.toLowerCase().startsWith('true')) return 'bg-green-500/15 text-green-500'
     if (verification.toLowerCase().startsWith('false')) return 'bg-red-500/15 text-red-500'
