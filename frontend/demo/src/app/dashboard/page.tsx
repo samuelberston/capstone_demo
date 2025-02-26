@@ -444,12 +444,6 @@ export default function Dashboard() {
                               <p className="text-gray-300">{finding.message}</p>
                             </div>
                             <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <h4 className="text-lg font-medium text-gray-200 mb-2">Location</h4>
-                              <p className="text-sm font-mono text-gray-400">
-                                {finding.file_path}:{finding.start_line}
-                              </p>
-                            </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                               <div className="flex items-center gap-2 mb-2">
                                 <h4 className="text-lg font-medium text-gray-200">Verification</h4>
                                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${getVerificationColor(finding.llm_verification)}`}>
@@ -467,7 +461,7 @@ export default function Dashboard() {
                               </div>
                               <p className="text-gray-300">{finding.llm_exploitability}</p>
                             </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700 lg:col-span-2">
+                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                               <div className="flex items-center gap-2 mb-2">
                                 <h4 className="text-lg font-medium text-gray-200">Priority</h4>
                                 <span className={`px-3 py-1 rounded-full text-sm font-medium ${
