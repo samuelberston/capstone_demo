@@ -18,17 +18,10 @@ def seed_database():
     # Create sample scan entries
     scans = [
         Scan(
-            repository_url="https://github.com/example/vulnerable-app",
+            repository_url="https://github.com/juice-shop/juice-shop",
             branch="main",
-            commit_hash="a1b2c3d4e5f6g7h8i9j0",
+            commit_hash="",
             scan_date=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1),
-            status="completed"
-        ),
-        Scan(
-            repository_url="https://github.com/example/secure-app",
-            branch="master",
-            commit_hash="1a2b3c4d5e6f7g8h9i0j",
-            scan_date=datetime.datetime.now(datetime.timezone.utc),
             status="completed"
         )
     ]
@@ -38,6 +31,30 @@ def seed_database():
 
     # Create sample CodeQL findings
     codeql_findings = [
+        CodeQLFinding(
+            scan_id=scans[0].id,
+            rule_id="js/sensitive-get-query",
+            rule_index=75,
+            message="Route handler for GET requests uses query parameter as sensitive data",
+            file_path="routes/changePassword.ts",
+            start_line=17,
+            start_column=25,
+            end_column=34,
+            fingerprint="6fbcb4891477c828:1",
+            llm_verification="This is a true positive. The code uses GET query parameters to transmit sensitive password data, which is a security risk as these parameters can be logged and appear in browser history.",
+            llm_exploitability="High - Password data in GET parameters can be exposed through browser history, server logs, and referrer headers.",
+            llm_remediation="Use POST method instead of GET for password changes. Sensitive data should be sent in the request body, not as query parameters.",
+            llm_priority="High priority - This violates security best practices for handling sensitive data and should be fixed immediately.",
+            raw_data={
+                "relatedLocations": [{
+                    "message": "Route handler",
+                    "line": 15,
+                    "startColumn": 10,
+                    "endLine": 48,
+                    "endColumn": 4
+                }]
+            }
+        ),
         CodeQLFinding(
             scan_id=scans[0].id,
             rule_id="js/sql-injection",
@@ -78,31 +95,31 @@ def seed_database():
     dependency_findings = [
         DependencyCheckFinding(
             scan_id=scans[0].id,
-            dependency_name="log4j-core",
-            dependency_version="2.14.1",
-            vulnerability_id="CVE-2021-44228",
-            vulnerability_name="Log4Shell",
+            dependency_name="express-jwt",
+            dependency_version="0.1.3",
+            vulnerability_id="CVE-2020-15084",
+            vulnerability_name="Authorization Bypass",
             severity="CRITICAL",
-            cvss_score=10.0,
-            description="Remote code execution vulnerability in Apache Log4j",
-            llm_exploitability="Critical - Widely exploited in the wild with publicly available proof of concept.",
-            llm_remediation="Upgrade to Log4j 2.15.0 or later immediately.",
-            llm_priority="Critical priority - Requires immediate patching due to active exploitation.",
-            raw_data={"cwe": "CWE-502", "references": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44228"]}
+            cvss_score=9.1,
+            description="In express-jwt (NPM package) up and including version 5.3.3, the algorithms entry to be specified in the configuration is not being enforced. When algorithms is not specified in the configuration, with the combination of jwks-rsa, it may lead to authorization bypass.",
+            llm_exploitability="High - The vulnerability allows bypassing authentication when specific conditions are met.",
+            llm_remediation="Update express-jwt to version 6.0.0 or later and ensure 'algorithms' is specified in the express-jwt configuration.",
+            llm_priority="Critical priority - This vulnerability could lead to unauthorized access and should be patched immediately.",
+            raw_data={"cwe": "CWE-287", "references": ["https://nvd.nist.gov/vuln/detail/CVE-2020-15084"]}
         ),
         DependencyCheckFinding(
-            scan_id=scans[1].id,
-            dependency_name="jquery",
-            dependency_version="3.3.1",
-            vulnerability_id="CVE-2019-11358",
-            vulnerability_name="Prototype Pollution",
+            scan_id=scans[0].id,
+            dependency_name="nanoid",
+            dependency_version="3.1.20",
+            vulnerability_id="CVE-2021-23566",
+            vulnerability_name="Information Exposure",
             severity="MEDIUM",
-            cvss_score=6.1,
-            description="jQuery before 3.4.0 is vulnerable to prototype pollution",
-            llm_exploitability="Low - Requires specific conditions and complex exploitation chain.",
-            llm_remediation="Update jQuery to version 3.4.0 or later.",
-            llm_priority="Low priority - Can be addressed in regular maintenance cycle.",
-            raw_data={"cwe": "CWE-915", "references": ["https://nvd.nist.gov/vuln/detail/CVE-2019-11358"]}
+            cvss_score=5.5,
+            description="The package nanoid from 3.0.0 and before 3.1.31 are vulnerable to Information Exposure via the valueOf() function which allows to reproduce the last id generated.",
+            llm_exploitability="Medium - An attacker could potentially predict or reproduce generated IDs, leading to information disclosure.",
+            llm_remediation="Update nanoid to version 3.1.31 or later to prevent exposure of generated IDs through valueOf() function.",
+            llm_priority="Medium priority - While not critical, this should be addressed to prevent potential ID prediction attacks.",
+            raw_data={"cwe": "CWE-200", "references": ["https://nvd.nist.gov/vuln/detail/CVE-2021-23566"]}
         )
     ]
     
