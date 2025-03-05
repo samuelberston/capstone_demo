@@ -16,7 +16,9 @@ class State(TypedDict):
     codeql_finding: Dict[str, Any]  # Store the current CodeQL finding being analyzed
     
 class CodeAnalysisAgent:
-    def __init__(self):
+    def __init__(self, repo_path: str = None):
+        # Initialize with repository path
+        self.repo_path = repo_path
         # Initialize the state graph
         self.graph_builder = StateGraph(State)
         
@@ -54,7 +56,20 @@ class CodeAnalysisAgent:
             
             file_path = artifact_location.get("uri", context.get("file_path"))
             start_line = region.get("startLine", context.get("start_line"))
-            end_line = region.get("startLine", context.get("end_line"))
+            end_line = region.get("endLine", context.get("end_line"))
+            
+            # Extract code flows for better context
+            code_flows = finding.get("codeFlows", [])
+            flow_context = ""
+            if code_flows:
+                flow_context = "\nData flow path:\n"
+                for flow in code_flows:
+                    for thread_flow in flow.get("threadFlows", []):
+                        for loc in thread_flow.get("locations", []):
+                            loc_info = loc.get("location", {})
+                            message = loc_info.get("message", {}).get("text", "")
+                            if message:
+                                flow_context += f"- {message}\n"
             
             if not all([file_path, start_line]):
                 return {"messages": ["Missing required context for code analysis"]}
@@ -64,9 +79,17 @@ class CodeAnalysisAgent:
             )
             
             return {
-                "context": {**context, "code_context": code_context},
+                "context": {**context, "code_context": code_context, "flow_context": flow_context},
                 "messages": [
-                    {"role": "system", "content": f"CodeQL Finding:\n{finding.get('message', {}).get('text', '')}\n\nAffected Code:\n{code_context}"}
+                    {"role": "system", "content": f"""
+CodeQL Finding: {finding.get('message', {}).get('text', '')}
+Rule ID: {finding.get('ruleId', 'Unknown')}
+
+Affected Code:
+{code_context}
+
+{flow_context}
+"""}
                 ]
             }
             
@@ -110,26 +133,37 @@ Please analyze the security vulnerability and provide:
     def _extract_code_context(self, file_path: str, start_line: int, end_line: int) -> str:
         """Extract code context from file"""
         try:
-            if not os.path.exists(file_path):
-                return ""
+            full_path = os.path.join(self.repo_path, file_path) if self.repo_path else file_path
+            
+            if not os.path.exists(full_path):
+                logger.error(f"File not found: {full_path}")
+                return f"File not found: {full_path}"
                 
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
                 lines = f.readlines()
                 
-            # Extract the relevant lines
-            context_lines = lines[start_line-1:end_line]
+            # Adjust for 0-based indexing
+            start_line = start_line - 1
+            end_line = end_line - 1
             
-            # Format the context with line numbers
+            # Add context by including a few lines before and after
+            context_start = max(0, start_line - 3)
+            context_end = min(len(lines), end_line + 3)
+            
+            # Extract the relevant lines
+            context_lines = lines[context_start:context_end]
+            
+            # Format the context with line numbers (convert back to 1-based for display)
             formatted_context = ""
-            for i, line in enumerate(context_lines, start=start_line):
-                marker = "→ " if i == start_line else "  "
+            for i, line in enumerate(context_lines, start=context_start + 1):
+                marker = "→ " if start_line + 1 <= i <= end_line + 1 else "  "
                 formatted_context += f"{marker}{i}: {line}"
                 
             return formatted_context
             
         except Exception as e:
             logger.error(f"Error extracting code context: {str(e)}")
-            return ""
+            return f"Error reading file: {str(e)}"
 
     def analyze(self, codeql_finding: Dict[str, Any]) -> Dict[str, Any]:
         """Main entry point for code analysis"""
