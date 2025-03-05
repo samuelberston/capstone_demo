@@ -1,1 +1,1 @@
-psql -h localhost -U samuelberston -d security_scan_db
+psql -U samuelberston -d security_scan_db
