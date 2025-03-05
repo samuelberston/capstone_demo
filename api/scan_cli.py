@@ -2,7 +2,7 @@
 import argparse
 import json
 import os
-from api.client import SecurityScannerClient
+from client import SecurityScannerClient
 
 def main():
     parser = argparse.ArgumentParser(description='Security Scanner Client')

@@ -9,3 +9,4 @@ security_scanner.pem
 infrastructure/terraform/security_scanner.pem
 .venv
 node_modules/
+__pycache__/

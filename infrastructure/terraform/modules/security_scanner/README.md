@@ -1,3 +1,4 @@
+
 # Security Scanner Module
 
 This Terraform module deploys a security scanning server on AWS EC2, configured with:
