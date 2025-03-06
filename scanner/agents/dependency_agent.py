@@ -30,7 +30,7 @@ class DependencyAnalysisAgent:
         self.graph_builder = StateGraph(State)
         
         logger.info("Initializing LLM and tools")
-        self.llm = ChatOpenAI(model="gpt-4o")
+        self.llm = ChatOpenAI(model="o1")
         # Use the analyze_dependency method directly since it's decorated with @tool
         self.tools = [self.analyze_dependency]
         self.llm_with_tools = self.llm.bind_tools(self.tools)

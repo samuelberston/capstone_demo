@@ -6,325 +6,206 @@ def test_xss_finding():
     
     # Direct CodeQL finding object
     xss_finding = {
-        "ruleId": "js/xss",
-        "ruleIndex": 37,
-        "rule": { "id": "js/xss", "index": 37 },
-        "message": {
-        "text": "Cross-site scripting vulnerability due to [user-provided value](1)."
-        },
-        "locations": [
-        {
-            "physicalLocation": {
-            "artifactLocation": {
-                "uri": "frontend/src/app/search-result/search-result.component.ts",
-                "uriBaseId": "%SRCROOT%",
-                "index": 31
-            },
-            "region": {
-                "startLine": 151,
-                "startColumn": 65,
-                "endColumn": 75
-            }
-            }
-        }
-        ],
-        "partialFingerprints": {
-        "primaryLocationLineHash": "61fdae2cc6ff3730:1",
-        "primaryLocationStartColumnFingerprint": "58"
-        },
-        "codeFlows": [
-        {
-            "threadFlows": [
+          "ruleId": "js/request-forgery",
+          "ruleIndex": 17,
+          "rule": { "id": "js/request-forgery", "index": 17 },
+          "message": {
+            "text": "The [URL](1) of this request depends on a [user-provided value](2)."
+          },
+          "locations": [
             {
-                "locations": [
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 144,
-                        "startColumn": 30,
-                        "endColumn": 61
-                        }
-                    },
-                    "message": { "text": "this.ro ... yParams" }
-                    }
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/profileImageUrlUpload.ts",
+                  "uriBaseId": "%SRCROOT%",
+                  "index": 1
                 },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 144,
-                        "startColumn": 9,
-                        "endColumn": 63
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 146,
-                        "startColumn": 20,
-                        "endColumn": 30
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 146,
-                        "startColumn": 20,
-                        "endColumn": 37
-                        }
-                    },
-                    "message": { "text": "queryParam.trim()" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 146,
-                        "startColumn": 7,
-                        "endColumn": 37
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 151,
-                        "startColumn": 65,
-                        "endColumn": 75
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
+                "region": {
+                  "startLine": 22,
+                  "startColumn": 30,
+                  "endLine": 23,
+                  "endColumn": 20
                 }
-                ]
+              }
             }
-            ]
-        },
-        {
-            "threadFlows": [
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "681cd2267e1fcfff:1",
+            "primaryLocationStartColumnFingerprint": "21"
+          },
+          "codeFlows": [
             {
-                "locations": [
+              "threadFlows": [
                 {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
+                  "locations": [
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "routes/profileImageUrlUpload.ts",
+                            "uriBaseId": "%SRCROOT%",
+                            "index": 1
+                          },
+                          "region": {
+                            "startLine": 18,
+                            "startColumn": 19,
+                            "endColumn": 27
+                          }
                         },
-                        "region": {
-                        "startLine": 144,
-                        "startColumn": 30,
-                        "endColumn": 61
-                        }
+                        "message": { "text": "req.body" }
+                      }
                     },
-                    "message": { "text": "this.ro ... yParams" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "routes/profileImageUrlUpload.ts",
+                            "uriBaseId": "%SRCROOT%",
+                            "index": 1
+                          },
+                          "region": {
+                            "startLine": 18,
+                            "startColumn": 13,
+                            "endColumn": 36
+                          }
                         },
-                        "region": {
-                        "startLine": 144,
-                        "startColumn": 9,
-                        "endColumn": 63
-                        }
+                        "message": { "text": "url" }
+                      }
                     },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "routes/profileImageUrlUpload.ts",
+                            "uriBaseId": "%SRCROOT%",
+                            "index": 1
+                          },
+                          "region": {
+                            "startLine": 23,
+                            "startColumn": 16,
+                            "endColumn": 19
+                          }
                         },
-                        "region": {
-                        "startLine": 145,
-                        "startColumn": 9,
-                        "endColumn": 19
-                        }
-                    },
-                    "message": { "text": "queryParam" }
+                        "message": { "text": "url" }
+                      }
                     }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 146,
-                        "startColumn": 7,
-                        "endColumn": 17
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 146,
-                        "startColumn": 20,
-                        "endColumn": 30
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 146,
-                        "startColumn": 20,
-                        "endColumn": 37
-                        }
-                    },
-                    "message": { "text": "queryParam.trim()" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 146,
-                        "startColumn": 7,
-                        "endColumn": 37
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 150,
-                        "startColumn": 32,
-                        "endColumn": 42
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
-                },
-                {
-                    "location": {
-                    "physicalLocation": {
-                        "artifactLocation": {
-                        "uri": "frontend/src/app/search-result/search-result.component.ts",
-                        "uriBaseId": "%SRCROOT%",
-                        "index": 31
-                        },
-                        "region": {
-                        "startLine": 151,
-                        "startColumn": 65,
-                        "endColumn": 75
-                        }
-                    },
-                    "message": { "text": "queryParam" }
-                    }
+                  ]
                 }
-                ]
-            }
-            ]
-        }
-        ],
-        "relatedLocations": [
-        {
-            "id": 1,
-            "physicalLocation": {
-            "artifactLocation": {
-                "uri": "frontend/src/app/search-result/search-result.component.ts",
-                "uriBaseId": "%SRCROOT%",
-                "index": 31
+              ]
             },
-            "region": {
-                "startLine": 144,
-                "startColumn": 30,
-                "endColumn": 61
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "routes/profileImageUrlUpload.ts",
+                            "uriBaseId": "%SRCROOT%",
+                            "index": 1
+                          },
+                          "region": {
+                            "startLine": 18,
+                            "startColumn": 19,
+                            "endColumn": 27
+                          }
+                        },
+                        "message": { "text": "req.body" }
+                      }
+                    },
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "routes/profileImageUrlUpload.ts",
+                            "uriBaseId": "%SRCROOT%",
+                            "index": 1
+                          },
+                          "region": {
+                            "startLine": 18,
+                            "startColumn": 13,
+                            "endColumn": 36
+                          }
+                        },
+                        "message": { "text": "url" }
+                      }
+                    },
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "routes/profileImageUrlUpload.ts",
+                            "uriBaseId": "%SRCROOT%",
+                            "index": 1
+                          },
+                          "region": {
+                            "startLine": 19,
+                            "startColumn": 11,
+                            "endColumn": 14
+                          }
+                        },
+                        "message": { "text": "url" }
+                      }
+                    },
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "routes/profileImageUrlUpload.ts",
+                            "uriBaseId": "%SRCROOT%",
+                            "index": 1
+                          },
+                          "region": {
+                            "startLine": 23,
+                            "startColumn": 16,
+                            "endColumn": 19
+                          }
+                        },
+                        "message": { "text": "url" }
+                      }
+                    }
+                  ]
+                }
+              ]
             }
+          ],
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/profileImageUrlUpload.ts",
+                  "uriBaseId": "%SRCROOT%",
+                  "index": 1
+                },
+                "region": {
+                  "startLine": 23,
+                  "startColumn": 16,
+                  "endColumn": 19
+                }
+              },
+              "message": { "text": "URL" }
             },
-            "message": { "text": "user-provided value" }
+            {
+              "id": 2,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "routes/profileImageUrlUpload.ts",
+                  "uriBaseId": "%SRCROOT%",
+                  "index": 1
+                },
+                "region": {
+                  "startLine": 18,
+                  "startColumn": 19,
+                  "endColumn": 27
+                }
+              },
+              "message": { "text": "user-provided value" }
+            }
+          ]
         }
-        ]
-    }
-
+    
     # Initialize the agent with repository path
     agent = CodeAnalysisAgent(repo_path=repo_path)
 
