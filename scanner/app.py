@@ -208,11 +208,14 @@ def run_dependency_check(repo_path):
     Run OWASP Dependency-Check on the repository and return results.
     """
     try:
+        logger.info(f"Starting dependency check analysis for repo: {repo_path}")
+        
         # Install dependencies based on project type
         if os.path.exists(os.path.join(repo_path, 'package.json')):
             logger.info("Detected Node.js project, installing dependencies...")
             subprocess.run(['npm', 'install', '--package-lock-only'], 
-                         cwd=repo_path, check=True)
+                         cwd=repo_path, check=True, capture_output=True)
+            logger.info("Node.js dependencies installed successfully")
         
         if os.path.exists(os.path.join(repo_path, 'requirements.txt')):
             logger.info("Detected Python project, installing dependencies...")
@@ -231,24 +234,26 @@ def run_dependency_check(repo_path):
 
         # Create a unique output directory for this scan
         output_dir = os.path.join(DATA_DIR, f"depcheck_{uuid.uuid4().hex}")
-        os.makedirs(output_dir, exist_ok=True)
+        logger.info(f"Created output directory: {output_dir}")
         
-        # Output files
-        json_report = os.path.join(output_dir, "dependency-check-report.json")
-        html_report = os.path.join(output_dir, "dependency-check-report.html")
-        
-        # Run dependency-check
-        subprocess.run([
+        # Run dependency-check with verbose output
+        logger.info("Starting OWASP Dependency Check scan...")
+        result = subprocess.run([
             'dependency-check',
             '--scan', repo_path,
             '--format', 'JSON',
             '--format', 'HTML',
             '--out', output_dir,
-            '--enableExperimental'
-        ], check=True)
+            '--enableExperimental',
+            '--log', os.path.join(output_dir, 'dependency-check.log')  # Add specific log file
+        ], check=True, capture_output=True)
+        
+        logger.info(f"Dependency check completed. Output saved to: {output_dir}")
+        if result.stderr:
+            logger.warning(f"Dependency check stderr: {result.stderr.decode()}")
         
         # Read and parse the JSON results
-        with open(json_report, 'r') as f:
+        with open(os.path.join(output_dir, "dependency-check-report.json"), 'r') as f:
             results = json.load(f)
             
         # Add LLM reasoning to dependency findings if enabled
@@ -283,8 +288,8 @@ def run_dependency_check(repo_path):
         return {
             'success': True,
             'results': results,
-            'json_report': json_report,
-            'html_report': html_report
+            'json_report': os.path.join(output_dir, "dependency-check-report.json"),
+            'html_report': os.path.join(output_dir, "dependency-check-report.html")
         }
     except subprocess.CalledProcessError as e:
         return {'error': f'Dependency-Check analysis failed: {str(e)}'}
