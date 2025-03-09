@@ -9,7 +9,7 @@ import shutil
 import time
 from datetime import datetime, timedelta
 
-# Update these imports to be relative since we're inside the scanner package
+# Use relative imports instead of absolute
 from .agents.code_agent import CodeAnalysisAgent
 from .agents.dependency_agent import DependencyAnalysisAgent
 
