@@ -9,9 +9,9 @@ import shutil
 import time
 from datetime import datetime, timedelta
 
-# Update these imports to be absolute
-from scanner.agents.code_agent import CodeAnalysisAgent
-from scanner.agents.dependency_agent import DependencyAnalysisAgent
+# Update these imports to be relative since we're inside the scanner package
+from .agents.code_agent import CodeAnalysisAgent
+from .agents.dependency_agent import DependencyAnalysisAgent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

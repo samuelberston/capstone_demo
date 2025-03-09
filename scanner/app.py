@@ -3,7 +3,7 @@ import git
 import tempfile
 import logging
 import os
-from scanner.scan import detect_all_languages, run_codeql_analysis, run_dependency_check
+from .scan import detect_all_languages, run_codeql_analysis, run_dependency_check
 
 app = Flask(__name__)
 
