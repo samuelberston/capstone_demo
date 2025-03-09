@@ -6,20 +6,23 @@ import uuid
 import logging
 from pathlib import Path
 import shutil
-from scanner.agents.code_agent import CodeAnalysisAgent
-from scanner.agents.dependency_agent import DependencyAnalysisAgent
 import time
 from datetime import datetime, timedelta
+
+# Update these imports to be absolute
+from scanner.agents.code_agent import CodeAnalysisAgent
+from scanner.agents.dependency_agent import DependencyAnalysisAgent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Update paths to be absolute
 CODEQL_QUERIES_PATH = "/opt/security-scanner/codeql-queries"
-DATA_DIR = "/data"
+DATA_DIR = "/opt/security-scanner/data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Add cache directory
+# Add cache directory with absolute path
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
