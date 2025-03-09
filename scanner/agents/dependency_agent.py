@@ -497,43 +497,46 @@ CVSS v3 Score: {vuln['cvssv3'].get('baseScore')} ({vuln['cvssv3'].get('baseSever
         
         # Get context for imports
         for import_info in usage['import_statements']:
-            code_contexts.append(f"""
-Import in {import_info['file']}:
-{self._get_code_context(import_info['file'], import_info['line'])}
-""")
+            code_contexts.append(
+                f"Import in {import_info['file']}:\n"
+                f"{self._get_code_context(import_info['file'], import_info['line'])}"
+            )
             
         # Get context for configuration
         for config_info in usage['configuration']:
-            code_contexts.append(f"""
-Configuration in {config_info['file']}:
-{self._get_code_context(config_info['file'], config_info['line'])}
-""")
+            code_contexts.append(
+                f"Configuration in {config_info['file']}:\n"
+                f"{self._get_code_context(config_info['file'], config_info['line'])}"
+            )
             
         # Get context for direct usage
         for usage_info in usage['direct_usage']:
-            code_contexts.append(f"""
-Usage in {usage_info['file']}:
-{self._get_code_context(usage_info['file'], usage_info['line'])}
-""")
+            code_contexts.append(
+                f"Usage in {usage_info['file']}:\n"
+                f"{self._get_code_context(usage_info['file'], usage_info['line'])}"
+            )
         
-        prompt = f"""You are a security expert analyzing whether a vulnerability in {name} is exploitable.
-
-Vulnerability details:
-{vuln['description']}
-CVSS Score: {vuln['cvss_score']}
-Affected versions: {vuln['affected_versions']}
-
-The dependency is used in the following locations, with surrounding context:
-
-{'\n'.join(code_contexts)}
-
-Based on these code patterns, analyze:
-1. Whether the vulnerable functionality appears to be used
-2. If the usage patterns match known exploit patterns
-3. Whether there are any mitigating factors (like security configurations or input validation)
-4. Overall likelihood of exploitability
-
-Provide specific examples from the code that support your analysis."""
+        # Create the analysis prompt without using backslashes in f-strings
+        prompt = (
+            f"You are a security expert analyzing whether a vulnerability in {name} is exploitable.\n"
+            f"\n"
+            f"Vulnerability details:\n"
+            f"{vuln['description']}\n"
+            f"CVSS Score: {vuln['cvss_score']}\n"
+            f"Affected versions: {vuln['affected_versions']}\n"
+            f"\n"
+            f"The dependency is used in the following locations, with surrounding context:\n"
+            f"\n"
+            f"{chr(10).join(code_contexts)}\n"
+            f"\n"
+            f"Based on these code patterns, analyze:\n"
+            f"1. Whether the vulnerable functionality appears to be used\n"
+            f"2. If the usage patterns match known exploit patterns\n"
+            f"3. Whether there are any mitigating factors (like security configurations or input validation)\n"
+            f"4. Overall likelihood of exploitability\n"
+            f"\n"
+            f"Provide specific examples from the code that support your analysis."
+        )
 
         analysis = self.llm.invoke(prompt)
         
