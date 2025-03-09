@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 import git
 import tempfile
-from llm_reasoning import LLMReasoningEngine
 import logging
 import os
 from . import scan
@@ -11,19 +10,6 @@ app = Flask(__name__)
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Add environment variable for LLM API key
-LLM_API_KEY = os.environ.get('LLM_API_KEY', '')
-LLM_MODEL = os.environ.get('LLM_MODEL', 'gpt-4')
-LLM_API_BASE = os.environ.get('LLM_API_BASE', None)
-
-# Initialize LLM reasoning engine if API key is provided
-llm_engine = None
-if LLM_API_KEY:
-    llm_engine = LLMReasoningEngine(LLM_API_KEY, LLM_MODEL, LLM_API_BASE)
-    logger.info(f"LLM reasoning engine initialized with model: {LLM_MODEL}")
-else:
-    logger.warning("LLM_API_KEY not provided. LLM reasoning will be disabled.")
 
 @app.route('/analyze', methods=['POST'])
 def analyze_repo():
@@ -58,7 +44,7 @@ def analyze_repo():
 
             # Run CodeQL analysis for each detected language
             for lang in detected_languages:
-                analysis = scan.run_codeql_analysis(temp_dir, lang, github_url, llm_engine)
+                analysis = scan.run_codeql_analysis(temp_dir, lang, github_url)
                 
                 if 'error' in analysis:
                     return jsonify({'error': analysis['error']}), 400
@@ -68,7 +54,7 @@ def analyze_repo():
                     saved_files.append(analysis['saved_analysis_file'])
             
             # Run OWASP Dependency-Check
-            dependency_check_results = scan.run_dependency_check(temp_dir, llm_engine)
+            dependency_check_results = scan.run_dependency_check(temp_dir)
             
             if 'error' in dependency_check_results:
                 return jsonify({'error': dependency_check_results['error']}), 400

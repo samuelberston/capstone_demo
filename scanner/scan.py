@@ -8,6 +8,8 @@ from pathlib import Path
 import shutil
 from scanner.agents.code_agent import CodeAnalysisAgent
 from scanner.agents.dependency_agent import DependencyAnalysisAgent
+import time
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -16,6 +18,10 @@ logger = logging.getLogger(__name__)
 CODEQL_QUERIES_PATH = "/opt/security-scanner/codeql-queries"
 DATA_DIR = "/data"
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Add cache directory
+CACHE_DIR = os.path.join(DATA_DIR, "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 def detect_all_languages(repo_path):
     """
@@ -99,12 +105,50 @@ def get_query_suite_path(language, repo_url=None):
     }
     return query_suites.get(language)
 
+def get_cache_key(repo_path, language):
+    """Generate a unique cache key based on repo path and language."""
+    repo_hash = str(hash(repo_path))
+    return f"{repo_hash}_{language}"
+
+def get_cached_results(repo_path, language):
+    """Check if there are cached results less than 24 hours old."""
+    cache_key = get_cache_key(repo_path, language)
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
+    
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            cached_data = json.load(f)
+            cache_time = datetime.fromtimestamp(cached_data['timestamp'])
+            
+            if datetime.now() - cache_time < timedelta(hours=24):
+                logger.info(f"Using cached CodeQL results for {repo_path} ({language})")
+                return cached_data['results']
+    return None
+
+def save_to_cache(repo_path, language, results):
+    """Save analysis results to cache."""
+    cache_key = get_cache_key(repo_path, language)
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
+    
+    cache_data = {
+        'timestamp': time.time(),
+        'results': results
+    }
+    
+    with open(cache_file, 'w') as f:
+        json.dump(cache_data, f)
+
 def run_codeql_analysis(repo_path, language, repo_url=None):
     """
     Run CodeQL analysis on the repository for a single language
     and return simplified results including a reference to the
     persisted SARIF file.
     """
+    # Check cache first
+    cached_results = get_cached_results(repo_path, language)
+    if cached_results:
+        return cached_results
+
     with tempfile.TemporaryDirectory() as db_path:
         try:
             # Initialize the code analysis agent
@@ -195,6 +239,9 @@ def run_codeql_analysis(repo_path, language, repo_url=None):
                 'results': results,
                 'saved_analysis_file': permanent_path
             }
+
+            # Cache the results before returning
+            save_to_cache(repo_path, language, simplified_results)
             return simplified_results
 
         except subprocess.CalledProcessError as e:
