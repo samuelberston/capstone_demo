@@ -3,7 +3,7 @@ import git
 import tempfile
 import logging
 import os
-from . import scan
+from scanner.scan import detect_all_languages, run_codeql_analysis, run_dependency_check
 
 app = Flask(__name__)
 
@@ -34,7 +34,7 @@ def analyze_repo():
             )
             
             # Detect all languages
-            detected_languages = scan.detect_all_languages(temp_dir)
+            detected_languages = detect_all_languages(temp_dir)
             
             if not detected_languages:
                 detected_languages = ['python']
@@ -44,7 +44,7 @@ def analyze_repo():
 
             # Run CodeQL analysis for each detected language
             for lang in detected_languages:
-                analysis = scan.run_codeql_analysis(temp_dir, lang, github_url)
+                analysis = run_codeql_analysis(temp_dir, lang, github_url)
                 
                 if 'error' in analysis:
                     return jsonify({'error': analysis['error']}), 400
@@ -54,7 +54,7 @@ def analyze_repo():
                     saved_files.append(analysis['saved_analysis_file'])
             
             # Run OWASP Dependency-Check
-            dependency_check_results = scan.run_dependency_check(temp_dir)
+            dependency_check_results = run_dependency_check(temp_dir)
             
             if 'error' in dependency_check_results:
                 return jsonify({'error': dependency_check_results['error']}), 400
