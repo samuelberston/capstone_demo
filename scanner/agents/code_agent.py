@@ -152,6 +152,7 @@ Complete Data Flow Analysis:
             
             logger.info(f"Analyzing finding: {finding.get('ruleId', 'Unknown')}")
             
+            # First get the detailed analysis
             analysis = self.llm.invoke([
                 {"role": "system", "content": """You are a security code analysis assistant. 
 Analyze the following code, data flow, and CodeQL finding to explain the security vulnerability and suggest fixes.
@@ -173,6 +174,30 @@ Please provide a detailed analysis including:
 4. Recommended fixes
 """}
             ])
+
+            # Format the analysis as JSON with a more explicit prompt and include the code context
+            json_format = self.llm.invoke([
+                {"role": "system", "content": """You are a JSON formatter. Convert the security analysis into a JSON object with the following structure:
+{
+    "description": "Brief description of the vulnerability",
+    "dataFlow": "Explanation of how data moves through the code",
+    "impact": "Description of potential security impacts",
+    "recommendations": ["Array of specific recommendations"],
+    "vulnerableCode": "The relevant code snippet showing the vulnerability",
+    "location": "File and line number where the vulnerability exists"
+}
+Ensure the output is valid JSON and contains only these fields."""},
+                {"role": "user", "content": f"""Format this security analysis as JSON, including the vulnerable code snippet:
+
+Analysis:
+{analysis.content}
+
+Code Context:
+{code_context}
+
+File Location: {finding.get('locations', [{}])[0].get('physicalLocation', {}).get('artifactLocation', {}).get('uri', 'Unknown')}
+"""}
+            ])
             
             if "codeFlows" in finding:
                 logger.info("Code flows detected, marking for flow analysis")
@@ -180,7 +205,7 @@ Please provide a detailed analysis including:
                 
             logger.info("Code analysis completed successfully")
             return {
-                "context": {**context, "analysis": analysis.content},
+                "context": {**context, "analysis": analysis.content, "analysis_json": json_format.content},
                 "messages": [{"role": "assistant", "content": analysis.content}],
                 "codeql_finding": finding
             }
@@ -242,6 +267,7 @@ Please provide a detailed analysis including:
             logger.info("Analysis completed successfully")
             return {
                 "analysis": final_state.get("context", {}).get("analysis", ""),
+                "analysis_json": final_state.get("context", {}).get("analysis_json", ""),
                 "code_context": final_state.get("context", {}).get("code_context", ""),
                 "finding": codeql_finding
             }

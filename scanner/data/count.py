@@ -8,23 +8,41 @@ def count_results(json_file):
     # Get the results array
     results = data.get("results", [])
     
-    # Extract ruleIds from results
-    rule_ids = [result.get("ruleId") for result in results if result.get("ruleId")]
+    # Create separate counters for each severity level
+    severity_counters = {
+        'critical': Counter(),
+        'high': Counter(),
+        'medium': Counter(),
+        'low': Counter(),
+        'unknown': Counter()
+    }
     
-    # Count frequency of each rule
-    rule_counts = Counter(rule_ids)
+    # Extract ruleIds and categorize by severity
+    for result in results:
+        rule_id = result.get("ruleId")
+        # Get severity from the result, defaulting to 'unknown'
+        severity = result.get("severity", "unknown").lower()
+        
+        if rule_id:
+            if severity not in severity_counters:
+                severity = "unknown"
+            severity_counters[severity][rule_id] += 1
     
-    return rule_counts
+    return severity_counters
 
 # Example usage
-with open('juice-shop-codeql.json', 'r') as file:
+with open('/Users/samuelberston/Desktop/results_javascript_94bcf7a23892425b99db0a30f967d8b4.json', 'r') as file:
     json_content = file.read()
     rule_frequencies = count_results(json_content)
     
-    # Print total number of results
-    print(f"Total number of results: {sum(rule_frequencies.values())}")
+    # Print total number of results for each severity
+    total_results = sum(sum(counter.values()) for counter in rule_frequencies.values())
+    print(f"Total number of results: {total_results}")
     
-    # Print each rule and its frequency
-    print("\nRule frequencies:")
-    for rule, count in rule_frequencies.most_common():
-        print(f"{rule}: {count}")
+    # Print each rule and its frequency grouped by severity
+    print("\nRule frequencies by severity:")
+    for severity, counter in rule_frequencies.items():
+        if counter:  # Only print severity levels that have results
+            print(f"\n{severity.upper()}:")
+            for rule, count in counter.most_common():
+                print(f"{rule}: {count}")
