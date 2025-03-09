@@ -183,16 +183,16 @@ Please provide a detailed analysis including:
     "dataFlow": "Explanation of how data moves through the code",
     "impact": "Description of potential security impacts",
     "recommendations": ["Array of specific recommendations"],
-    "vulnerableCode": "The relevant code snippet showing the vulnerability",
+    "vulnerableCode": "The complete code block including line numbers and arrow markers",
     "location": "File and line number where the vulnerability exists"
 }
-Ensure the output is valid JSON and contains only these fields."""},
-                {"role": "user", "content": f"""Format this security analysis as JSON, including the vulnerable code snippet:
+Important: For the vulnerableCode field, include the ENTIRE code block with line numbers and arrow markers (→) exactly as shown in the original code context."""},
+                {"role": "user", "content": f"""Format this security analysis as JSON, including the complete vulnerable code snippet with line numbers and arrows:
 
 Analysis:
 {analysis.content}
 
-Code Context:
+Complete Code Context (include this exact block in vulnerableCode):
 {code_context}
 
 File Location: {finding.get('locations', [{}])[0].get('physicalLocation', {}).get('artifactLocation', {}).get('uri', 'Unknown')}
