@@ -66,13 +66,14 @@ class DependencyAnalysisAgent:
             dependency = state.get("dependency", {})
             
             # Get the version from the dependency data
-            dependency_version = dependency.get('version', '0.1.3')  # Default to 0.1.3 if not specified
+            dependency_version = dependency.get('version', '0.1.3')
             logger.info(f"Analyzing dependency: {dependency.get('name')} @ {dependency_version}")
-            logger.info(f"Context: {context}")
             
             # Get file contents where dependency is used
             usage = context.get('usage', {})
             file_contents = usage.get('file_contents', {})
+            
+            logger.info(f"Usage summary: {len(file_contents)} relevant files found")
             
             # Focus on the file that imports express-jwt
             relevant_file = next(
@@ -88,40 +89,111 @@ class DependencyAnalysisAgent:
                 file_content = "File content not found"
                 logger.warning("Could not find content of file with express-jwt import")
             
+            # First get detailed analysis
             analysis_prompt = {
-                "role": "user",
-                "content": f"""Analyze this dependency for security implications. DO NOT use any tools, provide direct analysis:
-
-                Dependency: {dependency.get('name')}
-                Version: {dependency_version}
-                
-                Implementation in {relevant_file}:
-                ```typescript
-                {file_content}
-                ```
-                
-                Known vulnerabilities:
-                - CVE-2020-15084 (CRITICAL): Authorization bypass when algorithms not specified
-                - CVSS Score: 9.1 (Critical)
-                - Affects versions <= 5.3.3
-                
-                Please provide:
-                1. Analysis of how the dependency is used in the codebase
-                2. Whether the vulnerability appears exploitable based on usage (considering version {dependency_version})
-                3. Specific recommendations for remediation
-                """
+                "role": "system",
+                "content": """You are a security expert analyzing a dependency for vulnerabilities.
+Analyze the dependency usage, known vulnerabilities, and provide specific recommendations."""
             }
             
-            logger.info("Sending analysis prompt to LLM")
-            response = self.llm.invoke([analysis_prompt])
-            logger.info(f"Received LLM response: {response}")
+            # Format vulnerability information dynamically
+            vuln_details = []
+            for vuln in context.get('vulnerabilities', []):
+                vuln_details.append(f"- {vuln.get('name', 'Unknown CVE')}: {vuln.get('description', 'No description')}")
+                if vuln.get('cvssScore'):
+                    vuln_details.append(f"- CVSS Score: {vuln['cvssScore']} ({vuln.get('severity', 'Unknown')})")
+                if vuln.get('affectedVersions'):
+                    vuln_details.append(f"- Affects versions: {vuln['affectedVersions']}")
             
-            # Convert AIMessage to dictionary
+            vuln_text = "\n".join(vuln_details) if vuln_details else "No known vulnerabilities"
+            
+            analysis_request = {
+                "role": "user",
+                "content": f"""Analyze this dependency for security implications:
+
+Dependency: {dependency.get('name')}
+Version: {dependency_version}
+
+Implementation in {relevant_file}:
+```typescript
+{file_content}
+```
+
+Known vulnerabilities:
+{vuln_text}
+
+Please provide:
+1. Analysis of how the dependency is used in the codebase
+2. Whether the vulnerability appears exploitable based on usage
+3. Specific recommendations for remediation"""
+            }
+            
+            logger.info("Requesting initial analysis from LLM")
+            analysis = self.llm.invoke([analysis_prompt, analysis_request])
+            
+            # Then format as JSON with a specific structure
+            json_prompt = {
+                "role": "system",
+                "content": """You are a security data formatter. Format the dependency analysis as JSON using ONLY the provided vulnerability data - do not substitute or omit any vulnerability information.
+
+For each vulnerability in the input data, you MUST include:
+- The exact CVE ID
+- The exact CVSS score
+- The exact severity level
+- All CWE IDs
+- The full vulnerability description
+
+Example structure:
+{
+    "dependency": {
+        "name": "package-name",
+        "version": "x.y.z",
+        "vulnerableVersions": "The exact version range from CVE data"
+    },
+    "usage": {
+        "implementation": "How the dependency is used",
+        "relevantFile": "File path",
+        "configurationDetails": "Configuration details"
+    },
+    "vulnerabilities": {
+        "cves": ["Exact CVE IDs from input"],
+        "severity": "Highest severity from input",
+        "cvssScore": "Highest CVSS score from input",
+        "description": "Description from most severe CVE",
+        "exploitable": "Whether exploitable based on usage",
+        "cwes": ["All CWE IDs from input"]
+    },
+    "recommendations": []
+}"""
+            }
+            
+            json_request = {
+                "role": "user",
+                "content": f"""Format this security data as JSON, using EXACTLY these vulnerability details:
+
+Vulnerability Data:
+CVE IDs: {[v.get('name') for v in context.get('vulnerabilities', [])]}
+Severities: {[v.get('severity') for v in context.get('vulnerabilities', [])]}
+CVSS Scores: {[v.get('cvssv3', {}).get('baseScore') for v in context.get('vulnerabilities', [])]}
+CWEs: {[cwe for v in context.get('vulnerabilities', []) for cwe in v.get('cwes', [])]}
+Description: {next((v.get('description') for v in context.get('vulnerabilities', []) if v.get('severity') == 'CRITICAL'), 'No description available')}
+Affected Versions: {next((v.get('vulnerableSoftware', [{}])[0].get('software', {}).get('versionEndIncluding') for v in context.get('vulnerabilities', [])), 'Unknown')}
+
+Usage Analysis:
+Dependency: {dependency.get('name')}@{dependency_version}
+File: {relevant_file}
+Analysis: {analysis.content}"""
+            }
+            
+            logger.info("Requesting JSON formatting of analysis")
+            json_response = self.llm.invoke([json_prompt, json_request])
+            
+            # Return formatted results
             analysis_result = {
-                "messages": [response],
+                "messages": [analysis],
                 "analysis": {
-                    "content": response.content if hasattr(response, 'content') else str(response),
-                    "tool_calls": response.tool_calls if hasattr(response, 'tool_calls') else None
+                    "content": analysis.content,
+                    "json_format": json_response.content
                 }
             }
             
@@ -136,11 +208,15 @@ class DependencyAnalysisAgent:
         logger.info("Extracting dependency context")
         try:
             dependency = state.get("dependency", {})
-            logger.info(f"Processing dependency: {dependency}")
+            # Log only essential dependency information
+            logger.info(f"Processing dependency: {dependency.get('name')}@{dependency.get('version')}")
             
             # Extract relevant context about the dependency
             usage = self._find_dependency_usage(dependency.get("name"))
-            logger.info(f"Found usage patterns: {usage}")
+            # Log concise usage summary
+            logger.info(f"Found usage patterns: {len(usage.get('import_statements', []))} imports, "
+                       f"{len(usage.get('configuration', []))} configurations, "
+                       f"{len(usage.get('direct_usage', []))} direct usages")
             
             context = {
                 "usage": usage,

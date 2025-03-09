@@ -280,9 +280,13 @@ def test_dependency_agent():
                     analysis_content = message.content
                     break
         
-        # Log the results
+        # Log the results in a more concise way
         logger.info("Analysis Results:")
-        logger.info("Vulnerability Info:")
+        logger.info("Dependency Info:")
+        logger.info(f"  Name: {dependency['name']}")
+        logger.info(f"  Version: {dependency['version']}")
+        
+        logger.info("\nVulnerability Info:")
         logger.info(f"  CVEs: {result.get('vulnerability_info', {}).get('cves', [])}")
         logger.info(f"  Severity: {result.get('vulnerability_info', {}).get('severities', [])}")
         logger.info(f"  CWEs: {result.get('vulnerability_info', {}).get('cwes', [])}")
@@ -294,8 +298,22 @@ def test_dependency_agent():
         logger.info(f"  Configuration patterns found: {len(usage.get('configuration', []))}")
         logger.info(f"  Direct usage patterns found: {len(usage.get('direct_usage', []))}")
         
-        logger.info("\nExploitability Analysis:")
-        logger.info(f"  Analysis: {analysis_content}")
+        logger.info("\nJSON Formatted Analysis:")
+        if result.get('analysis', {}).get('json_format'):
+            try:
+                json_analysis = json.loads(result['analysis']['json_format'])
+                logger.info(json.dumps(json_analysis, indent=2))
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing JSON analysis: {e}")
+                logger.info(result['analysis']['json_format'])
+        else:
+            logger.info("  No JSON formatted analysis available")
+        
+        logger.info("\nDetailed Analysis:")
+        if result.get('analysis', {}).get('content'):
+            logger.info(f"  Analysis: {result['analysis']['content']}")
+        else:
+            logger.info("  No detailed analysis content available")
         
         return result
         
