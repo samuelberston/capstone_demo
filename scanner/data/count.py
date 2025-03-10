@@ -31,7 +31,7 @@ def count_results(json_file):
     return severity_counters
 
 # Example usage
-with open('/Users/samuelberston/Desktop/results_javascript_94bcf7a23892425b99db0a30f967d8b4.json', 'r') as file:
+with open('/Users/samuelberston/Documents/MICS/courses/capstone/demo/scanner/data/juice-shop-codeql.json', 'r') as file:
     json_content = file.read()
     rule_frequencies = count_results(json_content)
     

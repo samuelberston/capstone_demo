@@ -1,6 +1,8 @@
 from scanner.agents.code_agent import CodeAnalysisAgent
 import logging
 import json
+import os
+from pathlib import Path
 
 # Configure logging with more detail
 logging.basicConfig(
@@ -428,5 +430,140 @@ def test_xss_finding():
     logger.info("Raw analysis preview: %s", 
                 result.get("analysis", "")[:200] if result.get("analysis") else "No analysis found")
 
+def test_critical_juice_shop_findings():
+    """Test processing critical findings from juice-shop-codeql.json"""
+    
+    # Critical rules from scan.py
+    CRITICAL_RULES = {
+        'js/sql-injection',
+        'js/code-injection',
+        'js/command-line-injection',
+        'js/xss',
+        'js/hardcoded-credentials',
+        'js/jwt-missing-verification',
+        'js/prototype-pollution',
+        'js/unsafe-deserialization',
+        'js/sensitive-data-exposure',
+        'js/server-side-request-forgery',
+        'js/open-redirect',
+        'js/request-forgery',
+        'js/path-injection',
+        'js/client-side-unvalidated-url-redirection',
+        'js/prototype-polluting-assignment',
+        'js/insecure-randomness',
+        'js/insufficient-password-hash',
+        'js/missing-token-validation'
+    }
+
+    # Get paths relative to the test file
+    test_dir = Path(__file__).parent
+    data_dir = test_dir.parent / 'data'
+    results_file = data_dir / 'juice-shop-codeql.json'
+    
+    logger.info(f"Reading CodeQL results from: {results_file}")
+    
+    try:
+        # Read the results file
+        with open(results_file, 'r') as f:
+            codeql_results = json.load(f)
+        
+        # Initialize the agent
+        agent = CodeAnalysisAgent()
+        
+        # Filter for critical findings
+        findings = codeql_results.get('results', [])
+        critical_findings = [f for f in findings if f.get('ruleId') in CRITICAL_RULES]
+        
+        logger.info(f"Found {len(critical_findings)} critical findings out of {len(findings)} total")
+        
+        # Process each critical finding
+        processed_results = []
+        for idx, finding in enumerate(critical_findings, 1):
+            rule_id = finding.get('ruleId', 'unknown')
+            logger.info(f"Processing finding {idx}/{len(critical_findings)}: {rule_id}")
+            
+            try:
+                # Run analysis
+                result = agent.analyze(finding)
+                
+                # Extract and validate JSON analysis
+                analysis_json = result.get('analysis_json', '')
+                if isinstance(analysis_json, str) and '{' in analysis_json:
+                    try:
+                        # Try to extract JSON object if it's embedded in markdown
+                        start_idx = analysis_json.find('{')
+                        end_idx = analysis_json.rfind('}') + 1
+                        json_str = analysis_json[start_idx:end_idx]
+                        analysis_data = json.loads(json_str)
+                        
+                        # Add metadata to the analysis
+                        processed_result = {
+                            'ruleId': rule_id,
+                            'location': finding.get('locations', [{}])[0].get('physicalLocation', {}).get('artifactLocation', {}).get('uri', 'unknown'),
+                            'message': finding.get('message', {}).get('text', ''),
+                            'analysis': analysis_data,
+                            'code_context': result.get('code_context', ''),
+                            'raw_finding': finding  # Include original finding for reference
+                        }
+                        processed_results.append(processed_result)
+                        
+                        logger.info(f"Successfully processed finding {idx}")
+                        
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse JSON for finding {idx}: {e}")
+                        continue
+                else:
+                    logger.warning(f"No valid JSON analysis found for finding {idx}")
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Error processing finding {idx}: {e}")
+                continue
+        
+        # Save processed results
+        output_file = data_dir / 'juice-shop-critical-findings.json'
+        with open(output_file, 'w') as f:
+            json.dump({
+                'summary': {
+                    'total_findings': len(findings),
+                    'critical_findings': len(critical_findings),
+                    'successfully_processed': len(processed_results),
+                    'critical_rules': list(CRITICAL_RULES)
+                },
+                'results': processed_results
+            }, f, indent=2)
+            
+        logger.info(f"Analysis complete. Processed {len(processed_results)} findings successfully")
+        logger.info(f"Results saved to: {output_file}")
+        
+        # Print summary statistics
+        print("\nAnalysis Summary")
+        print("-" * 50)
+        print(f"Total findings: {len(findings)}")
+        print(f"Critical findings: {len(critical_findings)}")
+        print(f"Successfully processed: {len(processed_results)}")
+        
+        # Print findings by rule
+        rule_counts = {}
+        for result in processed_results:
+            rule_counts[result['ruleId']] = rule_counts.get(result['ruleId'], 0) + 1
+            
+        print("\nFindings by rule:")
+        print("-" * 50)
+        for rule, count in sorted(rule_counts.items()):
+            print(f"{rule}: {count} finding(s)")
+            
+        # Validate results
+        assert len(processed_results) > 0, "No findings were processed"
+        assert all('analysis' in r for r in processed_results), "Some findings missing analysis"
+        assert all('code_context' in r for r in processed_results), "Some findings missing code context"
+        
+        return processed_results
+        
+    except Exception as e:
+        logger.error(f"Test failed: {str(e)}", exc_info=True)
+        raise
+
 if __name__ == "__main__":
-    test_xss_finding()
+#    test_xss_finding()
+    test_critical_juice_shop_findings()

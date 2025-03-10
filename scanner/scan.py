@@ -11,18 +11,19 @@ from datetime import datetime, timedelta
 
 # Use relative imports instead of absolute
 from .agents.code_agent import CodeAnalysisAgent
-from .agents.dependency_agent import DependencyAnalysisAgent
+from .agents.dependency import DependencyAnalysisAgent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Update paths to be absolute
-CODEQL_QUERIES_PATH = "/opt/security-scanner/codeql-queries"
-DATA_DIR = "/opt/security-scanner/data"
+# Update paths to work both locally and in /opt
+BASE_DIR = os.getenv('SECURITY_SCANNER_DIR', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CODEQL_QUERIES_PATH = os.getenv('CODEQL_QUERIES_PATH', os.path.join(BASE_DIR, "codeql-queries"))
+DATA_DIR = os.getenv('SECURITY_SCANNER_DATA', os.path.join(BASE_DIR, "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Add cache directory with absolute path
+# Add cache directory
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 

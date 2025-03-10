@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from scanner.agents.dependency_agent import DependencyAnalysisAgent
+from scanner.agents.dependency import DependencyAnalysisAgent
 
 # Configure logging
 logging.basicConfig(

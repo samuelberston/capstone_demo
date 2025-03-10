@@ -8,6 +8,7 @@ from langgraph.prebuilt import ToolNode
 import os
 import logging
 import re
+from .usage_analyzer import DependencyUsageAnalyzer, UsageMatch
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -27,13 +28,11 @@ class DependencyAnalysisAgent:
     def __init__(self, repo_path: str = None):
         logger.info(f"Initializing DependencyAnalysisAgent with repo path: {repo_path}")
         self.repo_path = repo_path
+        self.usage_analyzer = DependencyUsageAnalyzer(repo_path) if repo_path else None
         self.graph_builder = StateGraph(State)
         
-        logger.info("Initializing LLM and tools")
-        self.llm = ChatOpenAI(model="o1")
-        # Use the analyze_dependency method directly since it's decorated with @tool
-        self.tools = [self.analyze_dependency]
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        logger.info("Initializing LLM")
+        self.llm = ChatOpenAI(model="gpt-4")
         
         logger.info("Setting up graph structure")
         self._setup_graph()
@@ -45,11 +44,6 @@ class DependencyAnalysisAgent:
         # Add nodes
         self.graph_builder.add_node("analyze_dependency", self._analyze_dependency_node)
         self.graph_builder.add_node("extract_context", self._extract_context_node)
-        
-        # Add tool node for dependency analysis
-        logger.info("Adding tool node for dependency analysis")
-        tool_node = ToolNode(tools=self.tools)
-        self.graph_builder.add_node("tools", tool_node)
         
         # Simplify the graph flow
         logger.info("Configuring graph edges")
@@ -75,10 +69,10 @@ class DependencyAnalysisAgent:
             
             logger.info(f"Usage summary: {len(file_contents)} relevant files found")
             
-            # Focus on the file that imports express-jwt
+            # Focus on the file that imports the dependency
             relevant_file = next(
-                (import_info['file'] for import_info in usage.get('import_statements', [])
-                 if import_info['file'] in file_contents),
+                (import_info.file for import_info in usage.get('import_statements', [])
+                 if import_info.file in file_contents),
                 None
             )
             
@@ -87,7 +81,7 @@ class DependencyAnalysisAgent:
                 logger.info(f"Found relevant file content from {relevant_file}")
             else:
                 file_content = "File content not found"
-                logger.warning("Could not find content of file with express-jwt import")
+                logger.warning("Could not find content of file with import")
             
             # First get detailed analysis
             analysis_prompt = {
@@ -228,56 +222,6 @@ Analysis: {analysis.content}"""
             logger.error(f"Error extracting context: {str(e)}", exc_info=True)
             return {"error": str(e)}
 
-    @tool
-    def analyze_dependency(self, name: str, version: str) -> str:
-        """
-        Analyze a specific dependency for security implications.
-        Args:
-            name: Name of the dependency
-            version: Version of the dependency
-        Returns:
-            String containing the dependency analysis
-        """
-        logger.info(f"Analyzing dependency {name}@{version}")
-        try:
-            # Get the dependency context
-            context = self._extract_dependency_context(name, version)
-            
-            # Extract vulnerability information
-            vuln_info = self._extract_vulnerability_info(context)
-            
-            analysis_message = {
-                "role": "user",
-                "content": f"""Analyze the following dependency for security implications:
-
-Dependency Information:
-Name: {name}
-Version: {version}
-
-Vulnerability Details:
-{self._format_vulnerability_details(vuln_info)}
-
-Context: {context}
-
-Please provide a detailed analysis including:
-1. Severity and CVSS Scores: {self._format_cvss_scores(vuln_info)}
-2. Vulnerability Description and Attack Vectors
-3. Specific Vulnerable Configurations
-4. Recommended Remediation Steps
-5. Available Patch Versions
-"""
-            }
-            
-            # Get analysis from LLM
-            logger.info("Requesting LLM analysis of dependency")
-            response = self.llm.invoke([analysis_message])
-            logger.info("Dependency analysis completed")
-            return response.content
-            
-        except Exception as e:
-            logger.error(f"Error analyzing dependency: {str(e)}", exc_info=True)
-            return f"Error analyzing dependency: {str(e)}"
-
     def _extract_vulnerability_info(self, context: Dict) -> Dict:
         """Extract vulnerability information from dependency-check findings"""
         vuln_info = {
@@ -322,105 +266,33 @@ CVSS v3 Score: {vuln['cvssv3'].get('baseScore')} ({vuln['cvssv3'].get('baseSever
 """)
         return '\n'.join(scores) if scores else "No CVSS scores available"
 
-    def _should_analyze_dependency(self, state: State) -> str:
-        """Determine if we should perform deeper dependency analysis"""
-        # For now, always analyze dependencies
-        return "tools"
-
     def _find_dependency_usage(self, name: str) -> Dict:
         """Find how the dependency is used in the codebase."""
-        logger.info(f"Analyzing usage patterns for dependency: {name}")
-        
-        if not self.repo_path:
+        if not self.usage_analyzer:
             logger.warning("No repository path provided, skipping usage analysis")
             return {"error": "No repository path provided"}
             
-        try:
-            usage_info = {
-                "import_statements": [],
-                "require_statements": [],
-                "configuration": [],
-                "direct_usage": [],
-                "files_analyzed": 0,
-                "file_contents": {}  # Add file contents storage
-            }
+        return self.usage_analyzer.analyze_usage(name)
+
+    @tool
+    def analyze_dependency_usage(self, name: str, version: str) -> str:
+        """
+        Analyze how a dependency is used in the codebase.
+        Args:
+            name: Name of the dependency
+            version: Version of the dependency
+        Returns:
+            String containing analysis of dependency usage
+        """
+        usage_info = self._find_dependency_usage(name)
+        if "error" in usage_info:
+            return f"Error analyzing dependency usage: {usage_info['error']}"
             
-            # Common import patterns for different languages
-            import_patterns = [
-                rf"import\s+.*['\"]({re.escape(name)})['\"]",     # TypeScript/ES6 style
-                rf"from\s+['\"]({re.escape(name)})['\"]",         # TypeScript/ES6 style
-                rf"require\s*\(\s*['\"]({re.escape(name)})['\"]", # Node.js style
-                rf"import\s+{re.escape(name)}[\s;]",              # Python style
-                rf"from\s+{re.escape(name)}[\s;]",                # Python style
-            ]
-            
-            # Common configuration patterns
-            config_patterns = [
-                rf"['\"]?{re.escape(name)}['\"]?\s*:",  # JSON/YAML style
-                rf"{re.escape(name)}=",                  # Properties style
-                rf"<{re.escape(name)}>",                 # XML style
-            ]
-            
-            for root, _, files in os.walk(self.repo_path):
-                if any(skip in root for skip in ['.git', 'node_modules', 'venv', '__pycache__']):
-                    continue
-                    
-                for file in files:
-                    if not file.endswith(('.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.php', '.rb', 
-                                        '.json', '.yaml', '.yml', '.xml', '.properties', '.config')):
-                        continue
-                    
-                    file_path = os.path.join(root, file)
-                    usage_info['files_analyzed'] += 1
-                    
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read()
-                            
-                            # Store the entire file content if it contains the dependency
-                            if name in content:
-                                rel_path = os.path.relpath(file_path, self.repo_path)
-                                usage_info['file_contents'][rel_path] = content
-                            
-                            # Check for imports
-                            for pattern in import_patterns:
-                                try:
-                                    matches = re.finditer(pattern, content, re.MULTILINE)
-                                    for match in matches:
-                                        usage_info['import_statements'].append({
-                                            'file': os.path.relpath(file_path, self.repo_path),
-                                            'line': content.count('\n', 0, match.start()) + 1,
-                                            'statement': match.group().strip()
-                                        })
-                                except re.error as e:
-                                    logger.debug(f"Regex error in import pattern: {str(e)}")
-                                    continue
-                            
-                            # Check for configuration
-                            for pattern in config_patterns:
-                                try:
-                                    matches = re.finditer(pattern, content, re.MULTILINE)
-                                    for match in matches:
-                                        usage_info['configuration'].append({
-                                            'file': os.path.relpath(file_path, self.repo_path),
-                                            'line': content.count('\n', 0, match.start()) + 1,
-                                            'statement': match.group().strip()
-                                        })
-                                except re.error as e:
-                                    logger.debug(f"Regex error in config pattern: {str(e)}")
-                                    continue
-                            
-                    except (UnicodeDecodeError, IOError) as e:
-                        logger.debug(f"Error reading file {file_path}: {str(e)}")
-                        continue
-            
-            logger.info(f"Completed usage analysis for {name}. Found {len(usage_info['import_statements'])} imports in {len(usage_info['file_contents'])} relevant files")
-            
-            return usage_info
-            
-        except Exception as e:
-            logger.error(f"Error analyzing dependency usage: {str(e)}", exc_info=True)
-            return {"error": str(e)}
+        imports = len(usage_info.get('import_statements', []))
+        configs = len(usage_info.get('configuration', []))
+        files = len(usage_info.get('file_contents', {}))
+        
+        return f"Found {imports} imports and {configs} configurations across {files} files"
 
     def analyze(self, dependency: Dict) -> Dict:
         """
@@ -483,68 +355,3 @@ CVSS v3 Score: {vuln['cvssv3'].get('baseScore')} ({vuln['cvssv3'].get('baseSever
         except Exception as e:
             logger.error(f"Error getting code context from {file_path}: {str(e)}")
             return f"Error: Could not read file {file_path}"
-
-    def analyze_exploitability(self, state: State) -> Dict:
-        """Analyze whether the vulnerability is exploitable based on usage patterns."""
-        
-        # Construct analysis prompt
-        usage = state["usage_info"]
-        vuln = state["vulnerability_info"]
-        name = state["dependency_name"]
-        
-        # Get code context for each usage
-        code_contexts = []
-        
-        # Get context for imports
-        for import_info in usage['import_statements']:
-            code_contexts.append(
-                f"Import in {import_info['file']}:\n"
-                f"{self._get_code_context(import_info['file'], import_info['line'])}"
-            )
-            
-        # Get context for configuration
-        for config_info in usage['configuration']:
-            code_contexts.append(
-                f"Configuration in {config_info['file']}:\n"
-                f"{self._get_code_context(config_info['file'], config_info['line'])}"
-            )
-            
-        # Get context for direct usage
-        for usage_info in usage['direct_usage']:
-            code_contexts.append(
-                f"Usage in {usage_info['file']}:\n"
-                f"{self._get_code_context(usage_info['file'], usage_info['line'])}"
-            )
-        
-        # Create the analysis prompt without using backslashes in f-strings
-        prompt = (
-            f"You are a security expert analyzing whether a vulnerability in {name} is exploitable.\n"
-            f"\n"
-            f"Vulnerability details:\n"
-            f"{vuln['description']}\n"
-            f"CVSS Score: {vuln['cvss_score']}\n"
-            f"Affected versions: {vuln['affected_versions']}\n"
-            f"\n"
-            f"The dependency is used in the following locations, with surrounding context:\n"
-            f"\n"
-            f"{chr(10).join(code_contexts)}\n"
-            f"\n"
-            f"Based on these code patterns, analyze:\n"
-            f"1. Whether the vulnerable functionality appears to be used\n"
-            f"2. If the usage patterns match known exploit patterns\n"
-            f"3. Whether there are any mitigating factors (like security configurations or input validation)\n"
-            f"4. Overall likelihood of exploitability\n"
-            f"\n"
-            f"Provide specific examples from the code that support your analysis."
-        )
-
-        analysis = self.llm.invoke(prompt)
-        
-        return {
-            "analysis": {
-                "exploitability_analysis": analysis,
-                "code_contexts": code_contexts,
-                "import_patterns": usage['import_statements'],
-                "config_patterns": usage['configuration']
-            }
-        }
