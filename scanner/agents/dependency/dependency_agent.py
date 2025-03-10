@@ -9,20 +9,12 @@ import os
 import logging
 import re
 from .usage_analyzer import DependencyUsageAnalyzer, UsageMatch
+from .types import State
+from .analyzer import DependencyAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Define the state schema
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
-    context: Dict[str, Any]  # Store dependency context and analysis results
-    dependency: Dict[str, Any]  # Store the current dependency being analyzed
-    dependency_name: str
-    vulnerability_info: Dict
-    usage_info: Dict
-    analysis: Dict
 
 class DependencyAnalysisAgent:
     def __init__(self, repo_path: str = None):
@@ -30,6 +22,7 @@ class DependencyAnalysisAgent:
         self.repo_path = repo_path
         self.usage_analyzer = DependencyUsageAnalyzer(repo_path) if repo_path else None
         self.graph_builder = StateGraph(State)
+        self.analyzer = DependencyAnalyzer()
         
         logger.info("Initializing LLM")
         self.llm = ChatOpenAI(model="gpt-4")
@@ -222,50 +215,6 @@ Analysis: {analysis.content}"""
             logger.error(f"Error extracting context: {str(e)}", exc_info=True)
             return {"error": str(e)}
 
-    def _extract_vulnerability_info(self, context: Dict) -> Dict:
-        """Extract vulnerability information from dependency-check findings"""
-        vuln_info = {
-            'vulnerabilities': context.get('vulnerabilities', []),
-            'cves': [],
-            'severities': set(),
-            'cwes': []
-        }
-        
-        for vuln in vuln_info['vulnerabilities']:
-            if vuln.get('name', '').startswith('CVE-'):
-                vuln_info['cves'].append(vuln['name'])
-            vuln_info['severities'].add(vuln.get('severity', '').upper())
-            if vuln.get('cwes'):
-                vuln_info['cwes'].extend(vuln.get('cwes', []))
-        
-        return vuln_info
-
-    def _format_vulnerability_details(self, vuln_info: Dict) -> str:
-        """Format vulnerability details for analysis prompt"""
-        details = []
-        for vuln in vuln_info.get('vulnerabilities', []):
-            details.append(f"""
-- ID: {vuln.get('name')}
-- Severity: {vuln.get('severity', 'Unknown')}
-- Description: {vuln.get('description', 'No description available')}
-- CWEs: {', '.join(vuln.get('cwes', []))}
-""")
-        return '\n'.join(details)
-
-    def _format_cvss_scores(self, vuln_info: Dict) -> str:
-        """Format CVSS scores for analysis prompt"""
-        scores = []
-        for vuln in vuln_info.get('vulnerabilities', []):
-            if vuln.get('cvssv3'):
-                scores.append(f"""
-CVSS v3 Score: {vuln['cvssv3'].get('baseScore')} ({vuln['cvssv3'].get('baseSeverity')})
-- Attack Vector: {vuln['cvssv3'].get('attackVector')}
-- Attack Complexity: {vuln['cvssv3'].get('attackComplexity')}
-- Privileges Required: {vuln['cvssv3'].get('privilegesRequired')}
-- User Interaction: {vuln['cvssv3'].get('userInteraction')}
-""")
-        return '\n'.join(scores) if scores else "No CVSS scores available"
-
     def _find_dependency_usage(self, name: str) -> Dict:
         """Find how the dependency is used in the codebase."""
         if not self.usage_analyzer:
@@ -313,7 +262,7 @@ CVSS v3 Score: {vuln['cvssv3'].get('baseScore')} ({vuln['cvssv3'].get('baseSever
                 "context": {},
                 "dependency": dependency,
                 "dependency_name": dependency.get('name'),
-                "vulnerability_info": self._extract_vulnerability_info(dependency.get("context", {})),
+                "vulnerability_info": self.analyzer.extract_vulnerability_info(dependency.get("context", {})),
                 "usage_info": self._find_dependency_usage(dependency.get("name")),
                 "analysis": {}
             }
@@ -326,32 +275,3 @@ CVSS v3 Score: {vuln['cvssv3'].get('baseScore')} ({vuln['cvssv3'].get('baseSever
         except Exception as e:
             logger.error(f"Error in dependency analysis: {str(e)}", exc_info=True)
             return {"error": str(e)}
-
-    def _get_code_context(self, file_path: str, line_number: int, context_lines: int = 5) -> str:
-        """Get lines of code before and after a specific line number.
-        
-        Args:
-            file_path: Path to the source file
-            line_number: The line number to get context around
-            context_lines: Number of lines before and after to include
-            
-        Returns:
-            String containing the code context with line numbers
-        """
-        try:
-            with open(os.path.join(self.repo_path, file_path), 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-                
-            start = max(0, line_number - context_lines - 1)
-            end = min(len(lines), line_number + context_lines)
-            
-            context = []
-            for i in range(start, end):
-                prefix = '> ' if i == line_number - 1 else '  '
-                context.append(f"{prefix}{i+1}: {lines[i].rstrip()}")
-                
-            return '\n'.join(context)
-            
-        except Exception as e:
-            logger.error(f"Error getting code context from {file_path}: {str(e)}")
-            return f"Error: Could not read file {file_path}"

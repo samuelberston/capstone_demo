@@ -11,3 +11,4 @@ infrastructure/terraform/security_scanner.pem
 node_modules/
 __pycache__/
 juice-shop-critical-findings.json
+juice-shop/

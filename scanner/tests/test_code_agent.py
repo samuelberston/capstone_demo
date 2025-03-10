@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def test_xss_finding():
     # Path to your Juice Shop repository
-    repo_path = "/Users/samuelberston/Documents/MICS/courses/capstone/juice-shop"
+    repo_path = "/Users/samuelberston/Documents/MICS/courses/capstone/demo/juice-shop"
     
     logger.info("Starting XSS finding test")
     
@@ -433,6 +433,13 @@ def test_xss_finding():
 def test_critical_juice_shop_findings():
     """Test processing critical findings from juice-shop-codeql.json"""
     
+    # Path to your Juice Shop repository
+    repo_path = "/Users/samuelberston/Documents/MICS/courses/capstone/demo/juice-shop"
+    
+    # Verify repository exists
+    if not os.path.exists(repo_path):
+        raise FileNotFoundError(f"Repository not found at path: {repo_path}")
+    
     # Critical rules from scan.py
     CRITICAL_RULES = {
         'js/sql-injection',
@@ -467,8 +474,8 @@ def test_critical_juice_shop_findings():
         with open(results_file, 'r') as f:
             codeql_results = json.load(f)
         
-        # Initialize the agent
-        agent = CodeAnalysisAgent()
+        # Initialize the agent with repository path
+        agent = CodeAnalysisAgent(repo_path=repo_path)
         
         # Filter for critical findings
         findings = codeql_results.get('results', [])
