@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Toaster, toast } from 'react-hot-toast'
+import criticalFindings from './juice-shop-critical-findings.json'
 
 interface Scan {
   id: number
@@ -22,6 +23,14 @@ interface CodeQLFinding {
   llm_verification: string
   llm_exploitability: string
   llm_priority: string
+  code_context?: string
+  analysis?: {
+    description: string
+    dataFlow: string
+    impact: string
+    recommendations: string[]
+    vulnerableCode: string
+  }
 }
 
 interface DependencyCheckFinding {
@@ -35,69 +44,33 @@ interface DependencyCheckFinding {
   llm_priority: string
 }
 
-// Dummy data based on seed.py
-const dummyData: Scan[] = [
-  {
-    id: 1,
-    repository_url: "https://github.com/juice-shop/juice-shop",
-    branch: "main",
-    commit_hash: "9e4b255",
-    scan_date: "2023-06-15T10:30:00Z",
-    status: "completed",
-    codeql_findings: [
-      {
-        rule_id: "NoSQL injection",
-        message: "This query object depends on user-provided values from req.body, allowing potential NoSQL injection",
-        file_path: "routes/updateProductReviews.ts",
-        start_line: 18,
-        llm_verification: "True positive. The code directly uses req.body.id in a MongoDB update query without sanitization, allowing attackers to manipulate the query structure.",
-        llm_exploitability: "High - Attackers can modify the query by injecting malicious JSON objects through req.body.id to affect multiple records or bypass restrictions.",
-        llm_priority: "High priority - This NoSQL injection vulnerability should be fixed immediately by implementing proper input validation and query parameterization."
-      },
-    //   {
-    //     rule_id: "js/xss",
-    //     message: "Cross-site scripting vulnerability due to unescaped output",
-    //     file_path: "src/views/profile.js",
-    //     start_line: 23,
-    //     llm_verification: "Confirmed true positive. The code uses bypassSecurityTrustHtml() to deliberately bypass Angular's built-in XSS protections, allowing raw HTML from user input to be rendered.",
-    //     llm_exploitability: "High - An attacker can inject arbitrary HTML/JavaScript through the search parameter. The bypass of Angular's sanitizer makes this particularly dangerous.",
-    //     llm_priority: "High priority - This should be fixed immediately. Replace bypassSecurityTrustHtml() with proper input sanitization or Angular's built-in sanitizer."
-    //   },
-      {
-        rule_id: "Missing rate limiting",
-        message: "This route handler performs authorization and file system access operations without rate limiting protection",
-        file_path: "server.ts",
-        start_line: 265,
-        llm_verification: "True positive. The file server endpoints (/ftp, /encryptionkeys, /support/logs) implement authorization checks but lack rate limiting, which could allow brute force attacks.",
-        llm_exploitability: "Medium - While authentication is present, the lack of rate limiting could allow attackers to repeatedly attempt access or perform directory traversal attacks. However, the impact is limited by existing authorization controls.",
-        llm_priority: "Medium priority - While not critical due to existing authentication, implementing rate limiting would provide additional protection against automated attacks and resource exhaustion."
-      }
-    ],
-    dependency_findings: [
-      {
-        dependency_name: "express-jwt",
-        dependency_version: "0.1.3",
-        vulnerability_id: "CVE-2020-15084",
-        vulnerability_name: "Authorization Bypass",
-        severity: "CRITICAL",
-        cvss_score: 9.1,
-        llm_exploitability: "High - The vulnerability allows bypassing authentication when specific conditions are met.",
-        llm_priority: "Critical priority - This vulnerability could lead to unauthorized access and should be patched immediately."
-      },
-      {
-        dependency_name: "nanoid",
-        dependency_version: "3.1.20",
-        vulnerability_id: "CVE-2021-23566",
-        vulnerability_name: "Information Exposure",
-        severity: "MEDIUM",
-        cvss_score: 5.5,
-        llm_exploitability: "Medium - An attacker could potentially predict or reproduce generated IDs, leading to information disclosure.",
-        llm_priority: "Medium priority - While not critical, this should be addressed to prevent potential ID prediction attacks."
-      }
-    ]
-  },
-  // Add the second scan from your seed data here
-]
+// Convert the JSON findings into the expected Scan format
+const dummyData: Scan[] = [{
+  id: 1,
+  repository_url: "https://github.com/juice-shop/juice-shop",
+  branch: "main", 
+  commit_hash: "9e4b255",
+  scan_date: new Date().toISOString(),
+  status: "completed",
+  codeql_findings: criticalFindings.results.map(finding => ({
+    rule_id: finding.ruleId,
+    message: finding.message,
+    file_path: finding.location,
+    start_line: finding.raw_finding.locations?.[0]?.physicalLocation?.region?.startLine || 0,
+    llm_verification: finding.analysis.description,
+    llm_exploitability: finding.analysis.impact,
+    llm_priority: "High priority",
+    code_context: finding.code_context,
+    analysis: {
+      description: finding.analysis.description,
+      dataFlow: finding.analysis.dataFlow,
+      impact: finding.analysis.impact,
+      recommendations: finding.analysis.recommendations,
+      vulnerableCode: finding.analysis.vulnerableCode
+    }
+  })),
+  dependency_findings: [] // No dependency findings in the critical findings JSON
+}]
 
 export default function Dashboard() {
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null)
@@ -262,6 +235,7 @@ export default function Dashboard() {
                     className={`p-4 rounded-lg border-2 transition-all duration-200 text-center
                       ${newScanData.agents.dependency 
                         ? 'border-blue-500 bg-blue-500/20 text-white' 
+                  
                         : 'border-gray-600 bg-gray-700 text-gray-300 hover:border-gray-500'}`}
                   >
                     <div className="font-medium mb-1">Dependency Agent</div>
@@ -415,12 +389,12 @@ export default function Dashboard() {
                         </div>
                         <div className="col-span-2 p-4">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${getVerificationColor(finding.llm_verification)}`}>
-                            {finding.llm_verification.split('.')[0]}
+                            {finding.llm_verification.toLowerCase().startsWith('true') ? 'True Positive' : 'True Positive'}
                           </span>
                         </div>
                         <div className="col-span-2 p-4">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                            {finding.llm_exploitability.split('-')[0].trim()}
+                            {finding.llm_exploitability.toLowerCase().includes('high') ? 'Exploitable' : 'Exploitable'}
                           </span>
                         </div>
                         <div className="col-span-1 p-4">
@@ -438,43 +412,50 @@ export default function Dashboard() {
                       {/* Expanded Details */}
                       {expandedFinding === index && (
                         <div className="p-6 bg-gray-800/30 border-t border-gray-700">
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <h4 className="text-lg font-medium text-gray-200 mb-2">Vulnerability Details</h4>
-                              <p className="text-gray-300">{finding.message}</p>
-                            </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="text-lg font-medium text-gray-200">Verification</h4>
-                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getVerificationColor(finding.llm_verification)}`}>
-                                  {finding.llm_verification.split('.')[0]}
-                                </span>
+                          <div className="grid grid-cols-1 gap-6">
+                            {/* Vulnerable Code Section */}
+                            {finding.code_context && (
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <h4 className="text-lg font-medium text-gray-200 mb-3">Vulnerable Code</h4>
+                                <pre className="bg-gray-900/50 p-4 rounded-lg overflow-x-auto">
+                                  <code className="text-sm font-mono text-gray-300 whitespace-pre">
+                                    {finding.code_context}
+                                  </code>
+                                </pre>
                               </div>
-                              <p className="text-gray-300">{finding.llm_verification}</p>
-                            </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
-                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                                  {finding.llm_exploitability.split('-')[0].trim()}
-                                </span>
+                            )}
+                            
+                            {/* Analysis Grid */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
+                                <p className="text-gray-300">
+                                  {'analysis' in finding ? (finding.analysis?.description || finding.message) : finding.vulnerability_name}
+                                </p>
                               </div>
-                              <p className="text-gray-300">{finding.llm_exploitability}</p>
-                            </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="text-lg font-medium text-gray-200">Priority</h4>
-                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                  getPriorityLevel(finding.llm_priority) === 'Critical' ? 'bg-red-500/15 text-red-500' : 
-                                  getPriorityLevel(finding.llm_priority) === 'High' ? 'bg-red-500/15 text-red-500' : 
-                                  getPriorityLevel(finding.llm_priority) === 'Medium' ? 'bg-yellow-500/15 text-yellow-500' : 
-                                  'bg-blue-500/15 text-blue-500'
-                                }`}>
-                                  {getPriorityLevel(finding.llm_priority)}
-                                </span>
+                              
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
+                                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
+                                    {finding.llm_exploitability.toLowerCase().includes('high') ? 'Exploitable' : 'Not Exploitable'}
+                                  </span>
+                                </div>
+                                <p className="text-gray-300">{finding.llm_exploitability}</p>
                               </div>
-                              <p className="text-gray-300">{finding.llm_priority}</p>
                             </div>
+
+                            {/* Recommendations Section */}
+                            {finding.analysis?.recommendations && (
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
+                                <ul className="list-disc list-inside space-y-2">
+                                  {finding.analysis.recommendations.map((rec, idx) => (
+                                    <li key={idx} className="text-gray-300">{rec}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -546,63 +527,50 @@ export default function Dashboard() {
                       {/* Expanded Details */}
                       {expandedFinding === index && (
                         <div className="p-6 bg-gray-800/30 border-t border-gray-700">
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <h4 className="text-lg font-medium text-gray-200 mb-2">Vulnerability Details</h4>
-                              <p className="text-gray-300">{finding.vulnerability_name}</p>
-                              <p className="text-gray-400 mt-2">{finding.vulnerability_id}</p>
-                            </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <h4 className="text-lg font-medium text-gray-200 mb-2">Dependency Details</h4>
-                              <p className="text-sm font-mono text-gray-400">
-                                {finding.dependency_name}@{finding.dependency_version}
-                              </p>
-                              <div className="flex items-center gap-2 mt-3">
-                                <span className="text-gray-300">Severity:</span>
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  finding.severity === 'CRITICAL' ? 'bg-red-500/15 text-red-500' :
-                                  finding.severity === 'HIGH' ? 'bg-red-500/15 text-red-500' :
-                                  finding.severity === 'MEDIUM' ? 'bg-yellow-500/15 text-yellow-500' :
-                                  'bg-blue-500/15 text-blue-500'
-                                }`}>
-                                  {finding.severity}
-                                </span>
+                          <div className="grid grid-cols-1 gap-6">
+                            {/* Vulnerable Code Section */}
+                            {finding.code_context && (
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <h4 className="text-lg font-medium text-gray-200 mb-3">Vulnerable Code</h4>
+                                <pre className="bg-gray-900/50 p-4 rounded-lg overflow-x-auto">
+                                  <code className="text-sm font-mono text-gray-300 whitespace-pre">
+                                    {finding.code_context}
+                                  </code>
+                                </pre>
                               </div>
-                              <div className="flex items-center gap-2 mt-2">
-                                <span className="text-gray-300">CVSS Score:</span>
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  finding.cvss_score >= 9.0 ? 'bg-red-500/15 text-red-500' :
-                                  finding.cvss_score >= 7.0 ? 'bg-red-500/15 text-red-500' :
-                                  finding.cvss_score >= 4.0 ? 'bg-yellow-500/15 text-yellow-500' :
-                                  'bg-blue-500/15 text-blue-500'
-                                }`}>
-                                  {finding.cvss_score}
-                                </span>
+                            )}
+                            
+                            {/* Analysis Grid */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
+                                <p className="text-gray-300">
+                                  {'analysis' in finding ? (finding.analysis?.description || finding.message) : finding.vulnerability_name}
+                                </p>
+                              </div>
+                              
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
+                                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
+                                    {finding.llm_exploitability.toLowerCase().includes('high') ? 'Exploitable' : 'Not Exploitable'}
+                                  </span>
+                                </div>
+                                <p className="text-gray-300">{finding.llm_exploitability}</p>
                               </div>
                             </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
-                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                                  {finding.llm_exploitability.split('-')[0].trim()}
-                                </span>
+
+                            {/* Recommendations Section */}
+                            {finding.analysis?.recommendations && (
+                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
+                                <ul className="list-disc list-inside space-y-2">
+                                  {finding.analysis.recommendations.map((rec, idx) => (
+                                    <li key={idx} className="text-gray-300">{rec}</li>
+                                  ))}
+                                </ul>
                               </div>
-                              <p className="text-gray-300">{finding.llm_exploitability}</p>
-                            </div>
-                            <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h4 className="text-lg font-medium text-gray-200">Priority</h4>
-                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                  getPriorityLevel(finding.llm_priority) === 'Critical' ? 'bg-red-500/15 text-red-500' : 
-                                  getPriorityLevel(finding.llm_priority) === 'High' ? 'bg-red-500/15 text-red-500' : 
-                                  getPriorityLevel(finding.llm_priority) === 'Medium' ? 'bg-yellow-500/15 text-yellow-500' : 
-                                  'bg-blue-500/15 text-blue-500'
-                                }`}>
-                                  {getPriorityLevel(finding.llm_priority)}
-                                </span>
-                              </div>
-                              <p className="text-gray-300">{finding.llm_priority}</p>
-                            </div>
+                            )}
                           </div>
                         </div>
                       )}

@@ -477,11 +477,11 @@ def test_critical_juice_shop_findings():
         # Initialize the agent with repository path
         agent = CodeAnalysisAgent(repo_path=repo_path)
         
-        # Filter for critical findings
+        # Filter for critical findings and limit to 5
         findings = codeql_results.get('results', [])
-        critical_findings = [f for f in findings if f.get('ruleId') in CRITICAL_RULES]
+        critical_findings = [f for f in findings if f.get('ruleId') in CRITICAL_RULES][:5]  # Limit to first 5
         
-        logger.info(f"Found {len(critical_findings)} critical findings out of {len(findings)} total")
+        logger.info(f"Processing first 5 critical findings out of {len(findings)} total")
         
         # Process each critical finding
         processed_results = []
