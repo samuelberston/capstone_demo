@@ -38,8 +38,8 @@ class CodeAnalysisAgent:
         logger.info("Configuring state graph nodes and edges")
         
         # Add nodes
-        self.graph_builder.add_node("analyze_code", self._analyze_code_node)
         self.graph_builder.add_node("extract_context", self._extract_context_node)
+        self.graph_builder.add_node("analyze_code", self._analyze_code_node)
         
         # Add tool node for code flow analysis
         logger.info("Adding tool node for code flow analysis")
