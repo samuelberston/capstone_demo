@@ -75,6 +75,8 @@ def get_query_suite_path(language: str) -> str:
     # For JavaScript, use the security queries from the installed package
     if language == "javascript":
         return "/Users/samuelberston/.codeql/packages/codeql/javascript-queries/1.4.0/Security/CWE-089/SqlInjection.ql"
+    elif language == "python":
+        return "/Users/samuelberston/.codeql/packages/codeql/python-queries/1.4.0/Security/CWE-089/SqlInjection.ql"
     else:
         raise ValueError(f"Unsupported language: {language}")
 
@@ -213,9 +215,55 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
 
         # Install dependencies based on project type
         if os.path.exists(os.path.join(repo_path, 'package.json')):
-            logger.info("Detected Node.js project, installing dependencies...")
-            subprocess.run(['npm', 'install', '--package-lock-only'], 
-                         cwd=repo_path, check=True, capture_output=True)
+            logger.info("Detected Node.js project, checking npm availability...")
+            
+            # Try to find npm in common locations
+            npm_paths = [
+                '/usr/local/bin/npm',
+                '/usr/bin/npm',
+                '/opt/homebrew/bin/npm',  # macOS Homebrew
+                os.path.expanduser('~/.nvm/versions/node/*/bin/npm')  # NVM installations
+            ]
+            
+            npm_path = None
+            for path in npm_paths:
+                if '*' in path:
+                    import glob
+                    matches = glob.glob(path)
+                    if matches:
+                        npm_path = matches[0]
+                        break
+                elif os.path.exists(path):
+                    npm_path = path
+                    break
+            
+            if not npm_path:
+                logger.error("npm not found in any common locations")
+                raise RuntimeError("npm is not installed or not found in PATH")
+            
+            logger.info(f"Using npm at: {npm_path}")
+            
+            # First check if package-lock.json exists
+            if os.path.exists(os.path.join(repo_path, 'package-lock.json')):
+                logger.info("Found package-lock.json, using npm ci for clean install")
+                result = subprocess.run([npm_path, 'ci'], 
+                                     cwd=repo_path, 
+                                     capture_output=True, 
+                                     text=True)
+                if result.returncode != 0:
+                    logger.error(f"npm ci failed: {result.stderr}")
+                    raise subprocess.CalledProcessError(result.returncode, [npm_path, 'ci'], result.stdout, result.stderr)
+            else:
+                logger.info("No package-lock.json found, running npm install")
+                # Use --no-audit to speed up installation
+                result = subprocess.run([npm_path, 'install', '--no-audit'], 
+                                     cwd=repo_path, 
+                                     capture_output=True, 
+                                     text=True)
+                if result.returncode != 0:
+                    logger.error(f"npm install failed: {result.stderr}")
+                    raise subprocess.CalledProcessError(result.returncode, [npm_path, 'install'], result.stdout, result.stderr)
+            
             logger.info("Node.js dependencies installed successfully")
         
         if os.path.exists(os.path.join(repo_path, 'requirements.txt')):
@@ -267,15 +315,29 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
         with open(os.path.join(output_dir, "dependency-check-report.json"), 'r') as f:
             results = json.load(f)
               
-        # TODO: Filter out low severity dependencies for llm analysis      
+        # Log summary of dependencies found
+        if 'results' in results:
+            dependencies = results.get('results', {}).get('dependencies', [])
+            logger.info(f"Found {len(dependencies)} total dependencies")
+            
+            # Count vulnerabilities by severity
+            vuln_counts = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+            for dep in dependencies:
+                for vuln in dep.get('vulnerabilities', []):
+                    severity = vuln.get('severity', 'UNKNOWN')
+                    vuln_counts[severity] = vuln_counts.get(severity, 0) + 1
+            
+            logger.info(f"Vulnerability summary: {vuln_counts['HIGH']} High, {vuln_counts['MEDIUM']} Medium, {vuln_counts['LOW']} Low")
+              
         # Add LLM reasoning to dependency findings
         if 'results' in results:
             dependencies = results.get('results', {}).get('dependencies', [])
             if dependencies:
                 logger.info(f"Enhancing dependency findings with LLM reasoning")
                 enhanced_dependencies = []
-                for dependency in dependencies:
+                for i, dependency in enumerate(dependencies, 1):
                     if dependency.get('vulnerabilities'):
+                        logger.info(f"Analyzing dependency {i}/{len(dependencies)}: {dependency.get('fileName', 'Unknown')}")
                         try:
                             # Use the dependency analysis agent to analyze each vulnerable dependency
                             analysis_result = dep_agent.analyze(dependency)
@@ -288,11 +350,13 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
                                     "usage_patterns": analysis_result.get("context", {}).get("usage", {}),
                                     "exploitability": analysis_result.get("context", {}).get("exploitability", {})
                                 }
+                                logger.info(f"Successfully analyzed dependency {i}/{len(dependencies)}")
                         except Exception as e:
                             logger.error(f"Error enhancing dependency with LLM: {str(e)}")
                             dependency['llm_analysis'] = {"error": str(e)}
                     enhanced_dependencies.append(dependency)
                 results['results']['dependencies'] = enhanced_dependencies
+                logger.info("Completed LLM analysis of all dependencies")
 
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()

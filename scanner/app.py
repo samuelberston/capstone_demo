@@ -91,6 +91,13 @@ def create_app():
                         combined_results.extend(results)
 
                     # Run OWASP Dependency-Check
+                    if session and scan_id:
+                        scan = session.query(Scan).filter_by(id=scan_id).first()
+                        if scan:
+                            scan.status_message = 'Installing project dependencies'
+                            scan.progress_percentage = 65
+                            session.commit()
+
                     dependency_check_results = run_dependency_check(temp_dir, session, scan_id)
                     
                     if 'error' in dependency_check_results:
