@@ -69,20 +69,27 @@ def create_app():
 
                     # Run CodeQL analysis for each detected language
                     for lang in detected_languages:
-                        analysis = run_codeql_analysis(temp_dir, lang, github_url, session, scan_id)
+                        # Update scan status
+                        scan = session.query(Scan).filter_by(id=scan_id).first()
+                        if scan:
+                            scan.status_message = f'Running CodeQL analysis for {lang}'
+                            scan.progress_percentage = 20
+                            session.commit()
+
+                        analysis = run_codeql_analysis(temp_dir, lang)
                         
-                        if 'error' in analysis:
+                        if not analysis.get("success"):
                             scan = session.query(Scan).filter_by(id=scan_id).first()
                             if scan:
                                 scan.status = 'failed'
-                                scan.error_message = analysis['error']
+                                scan.error_message = analysis.get("error", "Unknown error during CodeQL analysis")
                                 session.commit()
                             return
 
-                        combined_results.extend(analysis.get('results', []))
-                        if 'saved_analysis_file' in analysis:
-                            saved_files.append(analysis['saved_analysis_file'])
-                    
+                        # Extract results from the analysis
+                        results = analysis.get("results", {}).get("runs", [{}])[0].get("results", [])
+                        combined_results.extend(results)
+
                     # Run OWASP Dependency-Check
                     dependency_check_results = run_dependency_check(temp_dir, session, scan_id)
                     

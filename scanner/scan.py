@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import time
 from datetime import datetime, timedelta
+from typing import Dict, Any
 
 # Use relative imports instead of absolute
 from .agents.code_agent import CodeAnalysisAgent
@@ -32,6 +33,7 @@ def detect_all_languages(repo_path):
     """
     Return a list of all detected languages based on file extensions.
     """
+    logger.info(f"Starting language detection in {repo_path}")
     language_stats = {}
     
     extensions = {
@@ -47,69 +49,34 @@ def detect_all_languages(repo_path):
         '.rb': 'ruby'
     }
     
+    file_count = 0
     for root, _, files in os.walk(repo_path):
         if '.git' in root:
             continue
         
         for file in files:
+            file_count += 1
+            if file_count % 100 == 0:
+                logger.info(f"Processed {file_count} files...")
+                
             ext = os.path.splitext(file)[1].lower()
             if ext in extensions:
                 lang = extensions[ext]
                 language_stats[lang] = language_stats.get(lang, 0) + 1
+                logger.debug(f"Found {lang} file: {file}")
     
-    return list(language_stats.keys())
+    detected_languages = list(language_stats.keys())
+    logger.info(f"Language detection complete. Found {len(detected_languages)} languages: {detected_languages}")
+    logger.info(f"Total files processed: {file_count}")
+    return detected_languages
 
-def get_query_suite_path(language, repo_url=None):
-    """Get the path to the appropriate query suite for the specified language."""
-    
-    # Special handling for Juice Shop repository
-    is_juice_shop = repo_url and 'juice-shop/juice-shop' in repo_url
-    
-    if is_juice_shop and language == 'javascript':
-        # Use filtered critical rules for Juice Shop
-        critical_rules = {
-            # Critical injection vulnerabilities
-            'js/sql-injection',
-            'js/code-injection',
-            'js/command-line-injection',
-            'js/xss',
-            
-            # Critical authentication & secrets
-            'js/hardcoded-credentials',
-            'js/jwt-missing-verification',
-            
-            # Critical security misconfigurations
-            'js/prototype-pollution',
-            'js/unsafe-deserialization',
-            
-            # Critical data exposure
-            'js/sensitive-data-exposure',
-            
-            # Critical infrastructure vulnerabilities
-            'js/server-side-request-forgery',
-            'js/open-redirect'
-        }
-        
-        # Create a temporary query suite file with only critical rules
-        temp_suite = tempfile.NamedTemporaryFile(mode='w', suffix='.qls', delete=False)
-        with temp_suite as f:
-            f.write("queries:\n")
-            f.write("  - include: .\n")
-            for rule in critical_rules:
-                f.write(f"  - include: {rule}\n")
-        return temp_suite.name
-    
-    # Default query suites for other repositories/languages
-    query_suites = {
-        'python': f"{CODEQL_QUERIES_PATH}/python/ql/src/codeql-suites/python-security-and-quality.qls",
-        'javascript': f"{CODEQL_QUERIES_PATH}/javascript/ql/src/codeql-suites/javascript-security-and-quality.qls",
-        'java': f"{CODEQL_QUERIES_PATH}/java/ql/src/codeql-suites/java-security-and-quality.qls",
-        'cpp': f"{CODEQL_QUERIES_PATH}/cpp/ql/src/codeql-suites/cpp-security-and-quality.qls",
-        'csharp': f"{CODEQL_QUERIES_PATH}/csharp/ql/src/codeql-suites/csharp-security-and-quality.qls",
-        'go': f"{CODEQL_QUERIES_PATH}/go/ql/src/codeql-suites/go-security-and-quality.qls",
-        'ruby': f"{CODEQL_QUERIES_PATH}/ruby/ql/src/codeql-suites/ruby-security-and-quality.qls"
-    }
-    return query_suites.get(language)
+def get_query_suite_path(language: str) -> str:
+    """Get the path to the CodeQL query suite for the given language."""
+    # For JavaScript, use the security queries from the installed package
+    if language == "javascript":
+        return "/Users/samuelberston/.codeql/packages/codeql/javascript-queries/1.4.0/Security/CWE-089/SqlInjection.ql"
+    else:
+        raise ValueError(f"Unsupported language: {language}")
 
 def get_cache_key(repo_path, language):
     """Generate a unique cache key based on repo path and language."""
@@ -144,278 +111,80 @@ def save_to_cache(repo_path, language, results):
     with open(cache_file, 'w') as f:
         json.dump(cache_data, f)
 
-def run_codeql_analysis(repo_path, language, repo_url=None, session=None, scan_id=None):
-    """
-    Run CodeQL analysis on the repository for a single language
-    and return simplified results including a reference to the
-    persisted SARIF file.
-    """
-    logger.info(f"Starting CodeQL analysis for {language} in {repo_path}")
-    
+def run_codeql_analysis(repo_path: str, language: str) -> Dict[str, Any]:
+    """Run CodeQL analysis on the repository."""
     try:
-        # Test CodeQL installation with more detailed output
-        logger.info("Testing CodeQL installation...")
-        try:
-            version_result = subprocess.run(
-                ['codeql', '--version'], 
-                check=True, 
-                capture_output=True, 
-                text=True
+        logger.info(f"Starting CodeQL analysis for {language} in {repo_path}")
+        
+        # Create a temporary directory for the CodeQL database
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "codeql_db")
+            results_path = os.path.join(temp_dir, "results.sarif")
+            
+            logger.info(f"Creating CodeQL database at {db_path}")
+            # Create CodeQL database
+            create_db_cmd = [
+                "codeql", "database", "create",
+                "--language=" + language,
+                "--source-root", repo_path,
+                "--verbose",
+                db_path
+            ]
+            
+            logger.info(f"Running command: {' '.join(create_db_cmd)}")
+            result = subprocess.run(
+                create_db_cmd,
+                capture_output=True,
+                text=True,
+                check=True
             )
-            logger.info(f"CodeQL version output: {version_result.stdout}")
-        except subprocess.CalledProcessError as e:
-            error_msg = f"CodeQL not properly installed: {e.stderr}"
-            logger.error(error_msg)
-            return {'error': error_msg}
-
-        # Get and verify query suite path
-        query_suite = get_query_suite_path(language, repo_url)
-        logger.info(f"Using query suite path: {query_suite}")
-        logger.info(f"Query suite exists: {os.path.exists(query_suite)}")
-        
-        if not query_suite:
-            error_msg = f'No query suite found for language: {language}'
-            logger.error(error_msg)
-            return {'error': error_msg}
-        
-        if not os.path.exists(query_suite):
-            error_msg = f'Query suite file not found at: {query_suite}'
-            logger.error(error_msg)
-            return {'error': error_msg}
-
-        with tempfile.TemporaryDirectory() as db_path:
-            try:
-                if session and scan_id:
-                    scan = session.query(Scan).filter_by(id=scan_id).first()
-                    if scan:
-                        scan.status_message = f'Creating CodeQL database for {language}'
-                        scan.progress_percentage = 15
-                        session.commit()
-
-                # Create CodeQL database with verbose output
-                logger.info(f"Creating CodeQL database for {language}")
-                create_db_result = subprocess.run(
-                    [
-                        'codeql', 'database', 'create',
-                        f'{db_path}/db',
-                        f'--language={language}',
-                        '--source-root', repo_path,
-                        '--verbose'  # Add verbose flag
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-                logger.info(f"Database creation output: {create_db_result.stdout}")
-
-                # Verify database was created
-                if not os.path.exists(f'{db_path}/db'):
-                    error_msg = "CodeQL database was not created successfully"
-                    logger.error(error_msg)
-                    return {'error': error_msg}
-
-                # Run analysis with verbose output
-                logger.info(f"Running CodeQL analysis for {language}")
-                results_path = f'{db_path}/results_{language}.sarif'
-                analyze_result = subprocess.run(
-                    [
-                        'codeql', 'database', 'analyze',
-                        f'{db_path}/db',
-                        '--format=sarif-latest',
-                        '-o', results_path,
-                        query_suite,
-                        '--verbose'  # Add verbose flag
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-                logger.info(f"Analysis output: {analyze_result.stdout}")
-
-                if session and scan_id:
-                    scan = session.query(Scan).filter_by(id=scan_id).first()
-                    if scan:
-                        scan.status_message = f'Processing CodeQL results for {language}'
-                        scan.progress_percentage = 35
-                        session.commit()
-
-                # Read and parse the results
-                with open(results_path, 'r') as f:
-                    analysis_results = json.load(f)
-
-                # Filter results for Juice Shop if needed
-                results = analysis_results.get('runs', [{}])[0].get('results', [])
-                if repo_url and 'juice-shop/juice-shop' in repo_url and language == 'javascript':
-                    critical_rules = {
-                        'js/sql-injection',
-                        'js/code-injection',
-                        'js/command-line-injection',
-                        'js/xss',
-                        'js/hardcoded-credentials',
-                        'js/jwt-missing-verification',
-                        'js/prototype-pollution',
-                        'js/unsafe-deserialization',
-                        'js/sensitive-data-exposure',
-                        'js/server-side-request-forgery',
-                        'js/open-redirect',
-                        'js/request-forgery',
-                        'js/path-injection',
-                        'js/client-side-unvalidated-url-redirection',
-                        'js/prototype-polluting-assignment',
-                        'js/insecure-randomness'
-                        'js/insufficient-password-hash',
-                        'js/missing-token-validation'
-                    }
-                    results = [r for r in results if r.get('ruleId') in critical_rules]
-
-                # Define critical rules for filtering
-                critical_rules_by_language = {
-                    'python': {
-                        'py/sql-injection',
-                        'py/command-line-injection',
-                        'py/code-injection',
-                        'py/path-injection',
-                        'py/unsafe-deserialization',
-                        'py/hardcoded-credentials',
-                        'py/weak-cryptography',
-                        'py/weak-hash',
-                        'py/weak-random',
-                        'py/weak-ssl',
-                        'py/xss',
-                        'py/request-forgery',
-                        'py/ssrf',
-                        'py/xxe',
-                        'py/zip-slip'
-                    },
-                    'javascript': {
-                        'js/sql-injection',
-                        'js/code-injection',
-                        'js/command-line-injection',
-                        'js/xss',
-                        'js/hardcoded-credentials',
-                        'js/jwt-missing-verification',
-                        'js/prototype-pollution',
-                        'js/unsafe-deserialization',
-                        'js/sensitive-data-exposure',
-                        'js/server-side-request-forgery',
-                        'js/open-redirect',
-                        'js/request-forgery',
-                        'js/path-injection',
-                        'js/client-side-unvalidated-url-redirection',
-                        'js/prototype-polluting-assignment',
-                        'js/insecure-randomness',
-                        'js/insufficient-password-hash',
-                        'js/missing-token-validation'
-                    },
-                    'java': {
-                        'java/sql-injection',
-                        'java/command-line-injection',
-                        'java/code-injection',
-                        'java/path-injection',
-                        'java/unsafe-deserialization',
-                        'java/hardcoded-credentials',
-                        'java/weak-cryptography',
-                        'java/weak-hash',
-                        'java/weak-random',
-                        'java/weak-ssl',
-                        'java/xss',
-                        'java/request-forgery',
-                        'java/ssrf',
-                        'java/xxe',
-                        'java/zip-slip'
-                    }
-                }
-
-                # Filter results to only include critical findings
-                critical_rules = critical_rules_by_language.get(language, set())
-                filtered_results = []
-                for finding in results:
-                    rule_id = finding.get('ruleId', '')
-                    if rule_id in critical_rules:
-                        filtered_results.append(finding)
-                    else:
-                        # Add basic metadata without LLM analysis
-                        finding['llm_analysis'] = {
-                            "skipped": True,
-                            "reason": "Not a critical finding",
-                            "rule_id": rule_id
-                        }
-
-                # Add LLM reasoning to filtered findings
-                if filtered_results:
-                    logger.info(f"Enhancing {len(filtered_results)} critical CodeQL findings with LLM reasoning")
-                    enhanced_results = []
-                    for finding in filtered_results:
-                        try:
-                            # Use the code analysis agent to analyze each finding
-                            analysis_result = code_agent.analyze(finding)
-                            if 'error' in analysis_result:
-                                logger.error(f"Error in LLM analysis: {analysis_result['error']}")
-                                finding['llm_analysis'] = {"error": analysis_result['error']}
-                            else:
-                                finding['llm_analysis'] = {
-                                    "analysis": analysis_result.get("analysis", ""),
-                                    "code_context": analysis_result.get("code_context", "")
-                                }
-                            enhanced_results.append(finding)
-                        except Exception as e:
-                            logger.error(f"Error enhancing finding with LLM: {str(e)}")
-                            finding['llm_analysis'] = {"error": str(e)}
-                            enhanced_results.append(finding)
-                    filtered_results = enhanced_results
-
-                # Combine filtered and unfiltered results
-                results = filtered_results + [r for r in results if r not in filtered_results]
-
-                # Save a permanent copy of the SARIF file
-                unique_filename = f"results_{language}_{uuid.uuid4().hex}.sarif"
-                permanent_path = os.path.join(DATA_DIR, unique_filename)
-                shutil.copy(results_path, permanent_path)
-
-                simplified_results = {
-                    'language': language,
-                    'results': results,
-                    'saved_analysis_file': permanent_path
-                }
-
-                # Cache the results before returning
-                save_to_cache(repo_path, language, simplified_results)
-
-                if session and scan_id:
-                    scan = session.query(Scan).filter_by(id=scan_id).first()
-                    if scan:
-                        scan.progress_percentage = 40
-                        session.commit()
-
-                return simplified_results
-
-            except subprocess.CalledProcessError as e:
-                error_msg = (
-                    f"CodeQL command failed:\n"
-                    f"Command: {e.cmd}\n"
-                    f"Exit code: {e.returncode}\n"
-                    f"Stdout: {e.stdout if e.stdout else 'None'}\n"
-                    f"Stderr: {e.stderr if e.stderr else 'None'}"
-                )
-                logger.error(error_msg)
-                if session and scan_id:
-                    scan = session.query(Scan).filter_by(id=scan_id).first()
-                    if scan:
-                        scan.status = 'failed'
-                        scan.error_message = error_msg
-                        session.commit()
-                return {'error': error_msg}
-
+            logger.info("CodeQL database created successfully")
+            
+            # Get query suite path
+            query_suite = get_query_suite_path(language)
+            logger.info(f"Using query suite: {query_suite}")
+            
+            # Run CodeQL analysis
+            analyze_cmd = [
+                "codeql", "database", "analyze",
+                db_path,
+                query_suite,
+                "--format=sarif-latest",
+                "--output=" + results_path
+            ]
+            
+            logger.info(f"Running command: {' '.join(analyze_cmd)}")
+            result = subprocess.run(
+                analyze_cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            logger.info("CodeQL analysis completed successfully")
+            
+            # Read and parse results
+            logger.info(f"Reading results from {results_path}")
+            with open(results_path, 'r') as f:
+                results = json.load(f)
+                
+            logger.info(f"Found {len(results.get('runs', [{}])[0].get('results', []))} results")
+            return {
+                "success": True,
+                "results": results
+            }
+            
+    except subprocess.CalledProcessError as e:
+        logger.error(f"CodeQL command failed: {e.stderr}")
+        return {
+            "success": False,
+            "error": f"CodeQL command failed: {e.stderr}"
+        }
     except Exception as e:
-        error_msg = f"Unexpected error during CodeQL analysis: {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        if session and scan_id:
-            scan = session.query(Scan).filter_by(id=scan_id).first()
-            if scan:
-                scan.status = 'failed'
-                scan.error_message = error_msg
-                session.commit()
-        return {'error': error_msg}
+        logger.error(f"Error running CodeQL analysis: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Error running CodeQL analysis: {str(e)}"
+        }
 
 def run_dependency_check(repo_path, session=None, scan_id=None):
     """
