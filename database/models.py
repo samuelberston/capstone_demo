@@ -14,6 +14,10 @@ class Scan(Base):
     commit_hash = Column(String(40))
     scan_date = Column(DateTime, default=datetime.datetime.utcnow)
     status = Column(String(50), default='pending')  # pending, running, completed, failed
+    current_step = Column(String(100))  # cloning, language_detection, codeql_analysis, dependency_check
+    progress_percentage = Column(Integer, default=0)
+    status_message = Column(Text)  # Detailed status message
+    error_message = Column(Text)  # Detailed error message if failed
     
     codeql_findings = relationship("CodeQLFinding", back_populates="scan")
     dependency_findings = relationship("DependencyCheckFinding", back_populates="scan")

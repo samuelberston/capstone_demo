@@ -3,46 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Toaster, toast } from 'react-hot-toast'
 import criticalFindings from './juice-shop-critical-findings.json'
-
-interface Scan {
-  id: number
-  repository_url: string
-  branch: string
-  commit_hash: string
-  scan_date: string
-  status: string
-  codeql_findings: CodeQLFinding[]
-  dependency_findings: DependencyCheckFinding[]
-}
-
-interface CodeQLFinding {
-  rule_id: string
-  message: string
-  file_path: string
-  start_line: number
-  llm_verification: string
-  llm_exploitability: string
-  llm_priority: string
-  code_context?: string
-  analysis?: {
-    description: string
-    dataFlow: string
-    impact: string
-    recommendations: string[]
-    vulnerableCode: string
-  }
-}
-
-interface DependencyCheckFinding {
-  dependency_name: string
-  dependency_version: string
-  vulnerability_id: string
-  vulnerability_name: string
-  severity: string
-  cvss_score: number
-  llm_exploitability: string
-  llm_priority: string
-}
+import { Scan } from '@/types/scan'
 
 // Convert the JSON findings into the expected Scan format
 const dummyData: Scan[] = [{
@@ -53,6 +14,8 @@ const dummyData: Scan[] = [{
   scan_date: new Date().toISOString(),
   status: "completed",
   codeql_findings: criticalFindings.results.map(finding => ({
+    id: 1,
+    scan_id: 1,
     rule_id: finding.ruleId,
     message: finding.message,
     file_path: finding.location,
@@ -72,6 +35,62 @@ const dummyData: Scan[] = [{
   dependency_findings: [] // No dependency findings in the critical findings JSON
 }]
 
+const API_BASE = 'http://localhost:5001';
+
+// Move fetchScans to top level, before resetRunningScans
+async function fetchScans() {
+  try {
+    const response = await fetch(`${API_BASE}/scans`);
+    if (!response.ok) throw new Error('Failed to fetch scans');
+    const data = await response.json();
+    return data.scans.sort((a: Scan, b: Scan) => 
+      new Date(b.scan_date).getTime() - new Date(a.scan_date).getTime()
+    );
+  } catch (error) {
+    console.error('Error fetching scans:', error);
+    return [];
+  }
+}
+
+// Add this function at the top level
+async function startScanRequest(repositoryUrl: string) {
+  const response = await fetch(`${API_BASE}/analyze`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ github_url: repositoryUrl }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to start scan');
+  }
+  return response.json();
+}
+
+// Add this function near the other API functions
+async function resetRunningScans() {
+  try {
+    const response = await fetch(`${API_BASE}/scans/reset`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error('Failed to reset scans');
+    
+    // Refresh the scans list
+    const updatedScans = await fetchScans();
+    return updatedScans;
+  } catch (error) {
+    console.error('Error resetting scans:', error);
+    throw error;
+  }
+}
+
+// Add this component
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center p-4">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+  </div>
+);
+
 export default function Dashboard() {
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -85,10 +104,56 @@ export default function Dashboard() {
     }
   })
   const [isMounted, setIsMounted] = useState(false)
+  const [scans, setScans] = useState<Scan[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   
   useEffect(() => {
     setIsMounted(true)
   }, [])
+
+  // Add this useEffect to load and update scans
+  useEffect(() => {
+    async function loadScans() {
+      const fetchedScans = await fetchScans();
+      setScans(fetchedScans.length > 0 ? fetchedScans : dummyData);
+      setIsLoading(false);
+      
+      // Start polling if there are any running scans
+      const hasRunningScans = fetchedScans.some((scan: Scan) => scan.status === 'running');
+      if (hasRunningScans) {
+        startPolling();
+      }
+    }
+    
+    loadScans();
+    
+    // Cleanup polling on unmount
+    return () => {
+      if (window.pollInterval) {
+        clearInterval(window.pollInterval);
+      }
+    };
+  }, []);
+
+  // Add this function to manage polling
+  const startPolling = () => {
+    // Clear any existing interval
+    if (window.pollInterval) {
+      clearInterval(window.pollInterval);
+    }
+    
+    // Start a new polling interval
+    window.pollInterval = setInterval(async () => {
+      const updatedScans = await fetchScans();
+      setScans(updatedScans);
+      
+      // Stop polling if no scans are running
+      const hasRunningScans = updatedScans.some((scan: Scan) => scan.status === 'running');
+      if (!hasRunningScans) {
+        clearInterval(window.pollInterval);
+      }
+    }, 2000);
+  };
 
   const getPriorityLevel = (priority: string): string => {
     if (priority.toLowerCase().includes('high')) return 'High'
@@ -115,32 +180,46 @@ export default function Dashboard() {
     setSelectedScan(selectedScan?.id === scan.id ? null : scan)
   }
 
-  const handleStartScan = (e: React.FormEvent) => {
+  const handleStartScan = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: Implement API call to start scan
+    const toastId = toast.loading('Starting scan...'); 
     
-    // Show success toast with updated styling
-    const repoName = newScanData.repositoryUrl.split('/').slice(-2).join('/')
-    toast.success(`Scan started on ${repoName}`, {
-      style: {
-        background: '#1f2937', // Lighter gray background
-        color: '#fff',
-        padding: '16px', // Larger padding
-        fontSize: '1.1rem', // Slightly larger text
-        borderRadius: '10px',
-        border: '1px solid #374151',
-      },
-      duration: 4000, // Show for 4 seconds
-    })
+    try {
+      // Make the API call
+      await startScanRequest(newScanData.repositoryUrl);
+      
+      // Immediately fetch and update scans to show the new one
+      const updatedScans = await fetchScans();
+      setScans(updatedScans);
+      
+      // Start polling if not already polling
+      startPolling();
+      
+      // Dismiss the loading toast and show success
+      toast.dismiss(toastId);
+      toast.success(`Scan started on ${newScanData.repositoryUrl.split('/').slice(-2).join('/')}`, {
+        style: {
+          background: '#1f2937',
+          color: '#fff',
+          padding: '16px',
+          fontSize: '1.1rem',
+          borderRadius: '10px',
+          border: '1px solid #374151',
+        },
+        duration: 4000,
+      });
 
-    setIsModalOpen(false)
-    setNewScanData({
-      repositoryUrl: '',
-      agents: {
-        code: true,
-        dependency: true
-      }
-    })
+      // Close modal and reset form
+      setIsModalOpen(false);
+      setNewScanData({
+        repositoryUrl: '',
+        agents: { code: true, dependency: true }
+      });
+
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error(`Failed to start scan: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   const handleFindingClick = (index: number) => {
@@ -153,6 +232,24 @@ export default function Dashboard() {
     }
     return new Date(dateString).toLocaleDateString();
   }
+
+  const clearFailedScans = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/scans/clear-failed`, {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('Failed to clear scans');
+      
+      // Refresh the scans list
+      const updatedScans = await fetchScans();
+      setScans(updatedScans.length > 0 ? updatedScans : []);
+      
+      toast.success('Successfully cleared failed scans');
+    } catch (error) {
+      toast.error('Failed to clear scans');
+      console.error('Error clearing scans:', error);
+    }
+  };
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -171,8 +268,8 @@ export default function Dashboard() {
       
       <h1 className="text-3xl font-bold mb-8 text-white text-center">Security Scan Dashboard</h1>
       
-      {/* Scans Section Header with New Scan Button */}
-      <div className="mb-12 text-center">
+      {/* Scans Section Header with Buttons */}
+      <div className="mb-12 text-center flex justify-center gap-4">
         <button
           onClick={() => setIsModalOpen(true)}
           className="px-8 py-4 text-lg font-semibold text-white rounded-xl
@@ -181,6 +278,36 @@ export default function Dashboard() {
             border-2 border-blue-400 shadow-lg hover:shadow-blue-500/30"
         >
           Start New Security Scan
+        </button>
+        
+        <button
+          onClick={clearFailedScans}
+          className="px-8 py-4 text-lg font-semibold text-white rounded-xl
+            bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800
+            transform hover:scale-105 transition-all duration-200
+            border-2 border-red-400 shadow-lg hover:shadow-red-500/30"
+        >
+          Clear Failed Scans
+        </button>
+
+        <button
+          onClick={async () => {
+            try {
+              await resetRunningScans();
+              toast.success('Successfully reset running scans');
+              // Refresh scans list
+              const updatedScans = await fetchScans();
+              setScans(updatedScans.length > 0 ? updatedScans : []);
+            } catch (error) {
+              toast.error(`Failed to reset running scans: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+          }}
+          className="px-8 py-4 text-lg font-semibold text-white rounded-xl
+            bg-gradient-to-r from-yellow-500 to-yellow-700 hover:from-yellow-600 hover:to-yellow-800
+            transform hover:scale-105 transition-all duration-200
+            border-2 border-yellow-400 shadow-lg hover:shadow-yellow-500/30"
+        >
+          Reset Running Scans
         </button>
       </div>
 
@@ -275,48 +402,87 @@ export default function Dashboard() {
 
       {/* Scans List */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {dummyData.map((scan) => (
-          <div 
-            key={scan.id}
-            className={`border rounded-lg p-6 cursor-pointer transition-all duration-200 
-              ${selectedScan?.id === scan.id 
-                ? 'border-blue-500 ring-2 ring-blue-200' 
-                : 'hover:border-gray-300 hover:shadow-md'}`}
-            onClick={() => handleScanClick(scan)}
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1">
-                <h2 className="font-semibold text-lg text-white truncate">{scan.repository_url.split('/').slice(-2).join('/')}</h2>
-                <p className="text-sm text-gray-400">Branch: {scan.branch}</p>
+        {isLoading ? (
+          <LoadingSpinner />
+        ) : scans.length === 0 ? (
+          <div className="text-gray-400 text-center py-8">No scans found</div>
+        ) : (
+          scans.map((scan) => (
+            <div 
+              key={scan.id}
+              className={`border rounded-lg p-6 cursor-pointer transition-all duration-200 
+                ${selectedScan?.id === scan.id 
+                  ? 'border-blue-500 ring-2 ring-blue-200' 
+                  : 'hover:border-gray-300 hover:shadow-md'}`}
+              onClick={() => handleScanClick(scan)}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex-1">
+                  <h2 className="font-semibold text-lg text-white truncate">{scan.repository_url.split('/').slice(-2).join('/')}</h2>
+                  <p className="text-sm text-gray-400">Branch: {scan.branch}</p>
+                </div>
+                <span className={`text-sm px-3 py-1 rounded-full flex items-center gap-2 ${
+                  scan.status === 'completed' ? 'bg-green-500/15 text-green-500 font-medium' : 
+                  scan.status === 'running' ? 'bg-blue-500/15 text-blue-500 font-medium animate-pulse' : 
+                  'bg-yellow-500/15 text-yellow-500 font-medium'
+                }`}>
+                  {scan.status === 'running' && (
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-500"></div>
+                  )}
+                  {scan.status}
+                </span>
               </div>
-              <span className={`text-sm px-3 py-1 rounded-full ${
-                scan.status === 'completed' ? 'bg-green-500/15 text-green-500 font-medium' : 'bg-yellow-500/15 text-yellow-500 font-medium'
-              }`}>
-                {scan.status}
-              </span>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm text-gray-600">
-                <span className="inline-block w-20">Commit:</span>
-                {scan.commit_hash ? scan.commit_hash.substring(0, 7) : 'N/A'}
-              </p>
-              <p className="text-sm text-gray-600">
-                <span className="inline-block w-20">Scanned:</span>
-                <time dateTime={scan.scan_date}>
-                  {formatDate(scan.scan_date)}
-                </time>
-              </p>
-            </div>
-            <div className="mt-4 flex gap-3">
-              <div className="bg-red-500/15 text-red-500 font-medium px-3 py-1 rounded-full text-sm">
-                {scan.codeql_findings.length} CodeQL
+              {scan.status === 'running' && (
+                <div className="mb-4">
+                  <div className="flex justify-between text-sm text-gray-400 mb-1">
+                    <span>{scan.current_step?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                    <span>{scan.progress_percentage}%</span>
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-2">
+                    <div 
+                      className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                      style={{ width: `${scan.progress_percentage || 0}%` }}
+                    ></div>
+                  </div>
+                  {scan.status_message && (
+                    <p className="text-sm text-gray-400 mt-2">{scan.status_message}</p>
+                  )}
+                </div>
+              )}
+              {scan.status === 'failed' && scan.error_message && (
+                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                  <p className="text-sm text-red-400">{scan.error_message}</p>
+                </div>
+              )}
+              <div className="space-y-1">
+                <p className="text-sm text-gray-600">
+                  <span className="inline-block w-20">Commit:</span>
+                  {scan.commit_hash ? (
+                    <span className="font-mono">{scan.commit_hash}</span>
+                  ) : scan.status === 'running' ? (
+                    <span className="text-gray-400">Fetching...</span>
+                  ) : (
+                    <span className="text-gray-400">N/A</span>
+                  )}
+                </p>
+                <p className="text-sm text-gray-600">
+                  <span className="inline-block w-20">Scanned:</span>
+                  <time dateTime={scan.scan_date}>
+                    {formatDate(scan.scan_date)}
+                  </time>
+                </p>
               </div>
-              <div className="bg-orange-500/15 text-orange-500 font-medium px-3 py-1 rounded-full text-sm">
-                {scan.dependency_findings.length} Dependencies
+              <div className="mt-4 flex gap-3">
+                <div className="bg-red-500/15 text-red-500 font-medium px-3 py-1 rounded-full text-sm">
+                  {(scan.codeql_findings || []).length} CodeQL
+                </div>
+                <div className="bg-orange-500/15 text-orange-500 font-medium px-3 py-1 rounded-full text-sm">
+                  {(scan.dependency_findings || []).length} Dependencies
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {/* Selected Scan Details */}
@@ -334,7 +500,7 @@ export default function Dashboard() {
                 }`}
               >
                 <span className="text-lg font-semibold">
-                  Code Vulnerabilities ({selectedScan.codeql_findings.length})
+                  Code Vulnerabilities ({(selectedScan.codeql_findings || []).length})
                 </span>
                 {activeTab === 'code' && (
                   <span className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500"></span>
@@ -349,7 +515,7 @@ export default function Dashboard() {
                 }`}
               >
                 <span className="text-lg font-semibold">
-                  Dependency Vulnerabilities ({selectedScan.dependency_findings.length})
+                  Dependency Vulnerabilities ({(selectedScan.dependency_findings || []).length})
                 </span>
                 {activeTab === 'dependency' && (
                   <span className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500"></span>
@@ -373,7 +539,7 @@ export default function Dashboard() {
                 
                 {/* Table Rows */}
                 <div className="divide-y divide-gray-700">
-                  {selectedScan.codeql_findings.map((finding, index) => (
+                  {(selectedScan.codeql_findings || []).map((finding, index) => (
                     <div key={index}>
                       {/* Row */}
                       <div 
@@ -413,24 +579,12 @@ export default function Dashboard() {
                       {expandedFinding === index && (
                         <div className="p-6 bg-gray-800/30 border-t border-gray-700">
                           <div className="grid grid-cols-1 gap-6">
-                            {/* Vulnerable Code Section */}
-                            {finding.code_context && (
-                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                <h4 className="text-lg font-medium text-gray-200 mb-3">Vulnerable Code</h4>
-                                <pre className="bg-gray-900/50 p-4 rounded-lg overflow-x-auto">
-                                  <code className="text-sm font-mono text-gray-300 whitespace-pre">
-                                    {finding.code_context}
-                                  </code>
-                                </pre>
-                              </div>
-                            )}
-                            
                             {/* Analysis Grid */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                               <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                                 <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
                                 <p className="text-gray-300">
-                                  {'analysis' in finding ? (finding.analysis?.description || finding.message) : finding.vulnerability_name}
+                                  {finding.analysis?.description || finding.message}
                                 </p>
                               </div>
                               
@@ -478,7 +632,7 @@ export default function Dashboard() {
                 
                 {/* Table Rows */}
                 <div className="divide-y divide-gray-700">
-                  {selectedScan.dependency_findings.map((finding, index) => (
+                  {(selectedScan.dependency_findings || []).map((finding, index) => (
                     <div key={index}>
                       {/* Row */}
                       <div 
@@ -528,24 +682,12 @@ export default function Dashboard() {
                       {expandedFinding === index && (
                         <div className="p-6 bg-gray-800/30 border-t border-gray-700">
                           <div className="grid grid-cols-1 gap-6">
-                            {/* Vulnerable Code Section */}
-                            {finding.code_context && (
-                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                <h4 className="text-lg font-medium text-gray-200 mb-3">Vulnerable Code</h4>
-                                <pre className="bg-gray-900/50 p-4 rounded-lg overflow-x-auto">
-                                  <code className="text-sm font-mono text-gray-300 whitespace-pre">
-                                    {finding.code_context}
-                                  </code>
-                                </pre>
-                              </div>
-                            )}
-                            
                             {/* Analysis Grid */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                               <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                                 <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
                                 <p className="text-gray-300">
-                                  {'analysis' in finding ? (finding.analysis?.description || finding.message) : finding.vulnerability_name}
+                                  {finding.analysis?.description || finding.description}
                                 </p>
                               </div>
                               
@@ -584,4 +726,11 @@ export default function Dashboard() {
       )}
     </div>
   )
+}
+
+// Add TypeScript declaration for the window property
+declare global {
+  interface Window {
+    pollInterval: NodeJS.Timeout | undefined;
+  }
 }

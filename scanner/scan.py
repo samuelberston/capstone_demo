@@ -12,19 +12,20 @@ from datetime import datetime, timedelta
 # Use relative imports instead of absolute
 from .agents.code_agent import CodeAnalysisAgent
 from .agents.dependency import DependencyAnalysisAgent
+from database.models import Scan, CodeQLFinding, DependencyCheckFinding
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Update paths to work both locally and in /opt
-BASE_DIR = os.getenv('SECURITY_SCANNER_DIR', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BASE_DIR = os.getenv('SECURITY_SCANNER_DIR', '/opt/security-scanner')
 CODEQL_QUERIES_PATH = os.getenv('CODEQL_QUERIES_PATH', os.path.join(BASE_DIR, "codeql-queries"))
 DATA_DIR = os.getenv('SECURITY_SCANNER_DATA', os.path.join(BASE_DIR, "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # Add cache directory
-CACHE_DIR = os.path.join(DATA_DIR, "cache")
+CACHE_DIR = os.getenv('SECURITY_SCANNER_DATA', os.path.join(BASE_DIR, "data"))
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 def detect_all_languages(repo_path):
@@ -92,7 +93,8 @@ def get_query_suite_path(language, repo_url=None):
         # Create a temporary query suite file with only critical rules
         temp_suite = tempfile.NamedTemporaryFile(mode='w', suffix='.qls', delete=False)
         with temp_suite as f:
-            f.write("- queries: .\n")
+            f.write("queries:\n")
+            f.write("  - include: .\n")
             for rule in critical_rules:
                 f.write(f"  - include: {rule}\n")
         return temp_suite.name
@@ -142,125 +144,304 @@ def save_to_cache(repo_path, language, results):
     with open(cache_file, 'w') as f:
         json.dump(cache_data, f)
 
-def run_codeql_analysis(repo_path, language, repo_url=None):
+def run_codeql_analysis(repo_path, language, repo_url=None, session=None, scan_id=None):
     """
     Run CodeQL analysis on the repository for a single language
     and return simplified results including a reference to the
     persisted SARIF file.
     """
-    # Check cache first
-    cached_results = get_cached_results(repo_path, language)
-    if cached_results:
-        return cached_results
-
-    with tempfile.TemporaryDirectory() as db_path:
+    logger.info(f"Starting CodeQL analysis for {language} in {repo_path}")
+    
+    try:
+        # Test CodeQL installation with more detailed output
+        logger.info("Testing CodeQL installation...")
         try:
-            # Initialize the code analysis agent
-            code_agent = CodeAnalysisAgent(repo_path=repo_path)
-            
-            # Create CodeQL database
-            subprocess.run([
-                'codeql', 'database', 'create',
-                f'{db_path}/db',
-                f'--language={language}',
-                '--source-root', repo_path
-            ], check=True)
-
-            # Get the appropriate query suite path - now always use the default suite
-            query_suite = get_query_suite_path(language)
-            if not query_suite:
-                return {'error': f'No query suite found for language: {language}'}
-
-            # Analyze the database
-            results_path = f'{db_path}/results_{language}.sarif'
-            subprocess.run([
-                'codeql', 'database', 'analyze',
-                f'{db_path}/db',
-                '--format=sarif-latest',
-                '-o', results_path,
-                query_suite
-            ], check=True)
-
-            # Read and parse the results
-            with open(results_path, 'r') as f:
-                analysis_results = json.load(f)
-
-            # Filter results for Juice Shop if needed
-            results = analysis_results.get('runs', [{}])[0].get('results', [])
-            if repo_url and 'juice-shop/juice-shop' in repo_url and language == 'javascript':
-                critical_rules = {
-                    'js/sql-injection',
-                    'js/code-injection',
-                    'js/command-line-injection',
-                    'js/xss',
-                    'js/hardcoded-credentials',
-                    'js/jwt-missing-verification',
-                    'js/prototype-pollution',
-                    'js/unsafe-deserialization',
-                    'js/sensitive-data-exposure',
-                    'js/server-side-request-forgery',
-                    'js/open-redirect',
-                    'js/request-forgery',
-                    'js/path-injection',
-                    'js/client-side-unvalidated-url-redirection',
-                    'js/prototype-polluting-assignment',
-                    'js/insecure-randomness'
-                    'js/insufficient-password-hash',
-                    'js/missing-token-validation'
-                }
-                results = [r for r in results if r.get('ruleId') in critical_rules]
-
-            # Add LLM reasoning to findings
-            if results:
-                logger.info(f"Enhancing {len(results)} CodeQL findings with LLM reasoning")
-                enhanced_results = []
-                for finding in results:
-                    try:
-                        # Use the code analysis agent to analyze each finding
-                        analysis_result = code_agent.analyze(finding)
-                        if 'error' in analysis_result:
-                            logger.error(f"Error in LLM analysis: {analysis_result['error']}")
-                            finding['llm_analysis'] = {"error": analysis_result['error']}
-                        else:
-                            finding['llm_analysis'] = {
-                                "analysis": analysis_result.get("analysis", ""),
-                                "code_context": analysis_result.get("code_context", "")
-                            }
-                        enhanced_results.append(finding)
-                    except Exception as e:
-                        logger.error(f"Error enhancing finding with LLM: {str(e)}")
-                        finding['llm_analysis'] = {"error": str(e)}
-                        enhanced_results.append(finding)
-                results = enhanced_results
-
-            # Save a permanent copy of the SARIF file
-            unique_filename = f"results_{language}_{uuid.uuid4().hex}.sarif"
-            permanent_path = os.path.join(DATA_DIR, unique_filename)
-            shutil.copy(results_path, permanent_path)
-
-            simplified_results = {
-                'language': language,
-                'results': results,
-                'saved_analysis_file': permanent_path
-            }
-
-            # Cache the results before returning
-            save_to_cache(repo_path, language, simplified_results)
-            return simplified_results
-
+            version_result = subprocess.run(
+                ['codeql', '--version'], 
+                check=True, 
+                capture_output=True, 
+                text=True
+            )
+            logger.info(f"CodeQL version output: {version_result.stdout}")
         except subprocess.CalledProcessError as e:
-            return {'error': f'CodeQL analysis failed for {language}: {str(e)}'}
+            error_msg = f"CodeQL not properly installed: {e.stderr}"
+            logger.error(error_msg)
+            return {'error': error_msg}
 
-def run_dependency_check(repo_path):
+        # Get and verify query suite path
+        query_suite = get_query_suite_path(language, repo_url)
+        logger.info(f"Using query suite path: {query_suite}")
+        logger.info(f"Query suite exists: {os.path.exists(query_suite)}")
+        
+        if not query_suite:
+            error_msg = f'No query suite found for language: {language}'
+            logger.error(error_msg)
+            return {'error': error_msg}
+        
+        if not os.path.exists(query_suite):
+            error_msg = f'Query suite file not found at: {query_suite}'
+            logger.error(error_msg)
+            return {'error': error_msg}
+
+        with tempfile.TemporaryDirectory() as db_path:
+            try:
+                if session and scan_id:
+                    scan = session.query(Scan).filter_by(id=scan_id).first()
+                    if scan:
+                        scan.status_message = f'Creating CodeQL database for {language}'
+                        scan.progress_percentage = 15
+                        session.commit()
+
+                # Create CodeQL database with verbose output
+                logger.info(f"Creating CodeQL database for {language}")
+                create_db_result = subprocess.run(
+                    [
+                        'codeql', 'database', 'create',
+                        f'{db_path}/db',
+                        f'--language={language}',
+                        '--source-root', repo_path,
+                        '--verbose'  # Add verbose flag
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                logger.info(f"Database creation output: {create_db_result.stdout}")
+
+                # Verify database was created
+                if not os.path.exists(f'{db_path}/db'):
+                    error_msg = "CodeQL database was not created successfully"
+                    logger.error(error_msg)
+                    return {'error': error_msg}
+
+                # Run analysis with verbose output
+                logger.info(f"Running CodeQL analysis for {language}")
+                results_path = f'{db_path}/results_{language}.sarif'
+                analyze_result = subprocess.run(
+                    [
+                        'codeql', 'database', 'analyze',
+                        f'{db_path}/db',
+                        '--format=sarif-latest',
+                        '-o', results_path,
+                        query_suite,
+                        '--verbose'  # Add verbose flag
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                logger.info(f"Analysis output: {analyze_result.stdout}")
+
+                if session and scan_id:
+                    scan = session.query(Scan).filter_by(id=scan_id).first()
+                    if scan:
+                        scan.status_message = f'Processing CodeQL results for {language}'
+                        scan.progress_percentage = 35
+                        session.commit()
+
+                # Read and parse the results
+                with open(results_path, 'r') as f:
+                    analysis_results = json.load(f)
+
+                # Filter results for Juice Shop if needed
+                results = analysis_results.get('runs', [{}])[0].get('results', [])
+                if repo_url and 'juice-shop/juice-shop' in repo_url and language == 'javascript':
+                    critical_rules = {
+                        'js/sql-injection',
+                        'js/code-injection',
+                        'js/command-line-injection',
+                        'js/xss',
+                        'js/hardcoded-credentials',
+                        'js/jwt-missing-verification',
+                        'js/prototype-pollution',
+                        'js/unsafe-deserialization',
+                        'js/sensitive-data-exposure',
+                        'js/server-side-request-forgery',
+                        'js/open-redirect',
+                        'js/request-forgery',
+                        'js/path-injection',
+                        'js/client-side-unvalidated-url-redirection',
+                        'js/prototype-polluting-assignment',
+                        'js/insecure-randomness'
+                        'js/insufficient-password-hash',
+                        'js/missing-token-validation'
+                    }
+                    results = [r for r in results if r.get('ruleId') in critical_rules]
+
+                # Define critical rules for filtering
+                critical_rules_by_language = {
+                    'python': {
+                        'py/sql-injection',
+                        'py/command-line-injection',
+                        'py/code-injection',
+                        'py/path-injection',
+                        'py/unsafe-deserialization',
+                        'py/hardcoded-credentials',
+                        'py/weak-cryptography',
+                        'py/weak-hash',
+                        'py/weak-random',
+                        'py/weak-ssl',
+                        'py/xss',
+                        'py/request-forgery',
+                        'py/ssrf',
+                        'py/xxe',
+                        'py/zip-slip'
+                    },
+                    'javascript': {
+                        'js/sql-injection',
+                        'js/code-injection',
+                        'js/command-line-injection',
+                        'js/xss',
+                        'js/hardcoded-credentials',
+                        'js/jwt-missing-verification',
+                        'js/prototype-pollution',
+                        'js/unsafe-deserialization',
+                        'js/sensitive-data-exposure',
+                        'js/server-side-request-forgery',
+                        'js/open-redirect',
+                        'js/request-forgery',
+                        'js/path-injection',
+                        'js/client-side-unvalidated-url-redirection',
+                        'js/prototype-polluting-assignment',
+                        'js/insecure-randomness',
+                        'js/insufficient-password-hash',
+                        'js/missing-token-validation'
+                    },
+                    'java': {
+                        'java/sql-injection',
+                        'java/command-line-injection',
+                        'java/code-injection',
+                        'java/path-injection',
+                        'java/unsafe-deserialization',
+                        'java/hardcoded-credentials',
+                        'java/weak-cryptography',
+                        'java/weak-hash',
+                        'java/weak-random',
+                        'java/weak-ssl',
+                        'java/xss',
+                        'java/request-forgery',
+                        'java/ssrf',
+                        'java/xxe',
+                        'java/zip-slip'
+                    }
+                }
+
+                # Filter results to only include critical findings
+                critical_rules = critical_rules_by_language.get(language, set())
+                filtered_results = []
+                for finding in results:
+                    rule_id = finding.get('ruleId', '')
+                    if rule_id in critical_rules:
+                        filtered_results.append(finding)
+                    else:
+                        # Add basic metadata without LLM analysis
+                        finding['llm_analysis'] = {
+                            "skipped": True,
+                            "reason": "Not a critical finding",
+                            "rule_id": rule_id
+                        }
+
+                # Add LLM reasoning to filtered findings
+                if filtered_results:
+                    logger.info(f"Enhancing {len(filtered_results)} critical CodeQL findings with LLM reasoning")
+                    enhanced_results = []
+                    for finding in filtered_results:
+                        try:
+                            # Use the code analysis agent to analyze each finding
+                            analysis_result = code_agent.analyze(finding)
+                            if 'error' in analysis_result:
+                                logger.error(f"Error in LLM analysis: {analysis_result['error']}")
+                                finding['llm_analysis'] = {"error": analysis_result['error']}
+                            else:
+                                finding['llm_analysis'] = {
+                                    "analysis": analysis_result.get("analysis", ""),
+                                    "code_context": analysis_result.get("code_context", "")
+                                }
+                            enhanced_results.append(finding)
+                        except Exception as e:
+                            logger.error(f"Error enhancing finding with LLM: {str(e)}")
+                            finding['llm_analysis'] = {"error": str(e)}
+                            enhanced_results.append(finding)
+                    filtered_results = enhanced_results
+
+                # Combine filtered and unfiltered results
+                results = filtered_results + [r for r in results if r not in filtered_results]
+
+                # Save a permanent copy of the SARIF file
+                unique_filename = f"results_{language}_{uuid.uuid4().hex}.sarif"
+                permanent_path = os.path.join(DATA_DIR, unique_filename)
+                shutil.copy(results_path, permanent_path)
+
+                simplified_results = {
+                    'language': language,
+                    'results': results,
+                    'saved_analysis_file': permanent_path
+                }
+
+                # Cache the results before returning
+                save_to_cache(repo_path, language, simplified_results)
+
+                if session and scan_id:
+                    scan = session.query(Scan).filter_by(id=scan_id).first()
+                    if scan:
+                        scan.progress_percentage = 40
+                        session.commit()
+
+                return simplified_results
+
+            except subprocess.CalledProcessError as e:
+                error_msg = (
+                    f"CodeQL command failed:\n"
+                    f"Command: {e.cmd}\n"
+                    f"Exit code: {e.returncode}\n"
+                    f"Stdout: {e.stdout if e.stdout else 'None'}\n"
+                    f"Stderr: {e.stderr if e.stderr else 'None'}"
+                )
+                logger.error(error_msg)
+                if session and scan_id:
+                    scan = session.query(Scan).filter_by(id=scan_id).first()
+                    if scan:
+                        scan.status = 'failed'
+                        scan.error_message = error_msg
+                        session.commit()
+                return {'error': error_msg}
+
+    except Exception as e:
+        error_msg = f"Unexpected error during CodeQL analysis: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status = 'failed'
+                scan.error_message = error_msg
+                session.commit()
+        return {'error': error_msg}
+
+def run_dependency_check(repo_path, session=None, scan_id=None):
     """
     Run OWASP Dependency-Check on the repository and return results.
     """
     try:
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.current_step = 'dependency_check'
+                scan.progress_percentage = 60
+                scan.status_message = 'Starting dependency check analysis'
+                session.commit()
+
         # Initialize the dependency analysis agent
         dep_agent = DependencyAnalysisAgent(repo_path=repo_path)
         
         logger.info(f"Starting dependency check analysis for repo: {repo_path}")
         
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status_message = 'Installing project dependencies'
+                scan.progress_percentage = 65
+                session.commit()
+
         # Install dependencies based on project type
         if os.path.exists(os.path.join(repo_path, 'package.json')):
             logger.info("Detected Node.js project, installing dependencies...")
@@ -283,6 +464,13 @@ def run_dependency_check(repo_path):
             subprocess.run(['gradle', 'dependencies'],
                          cwd=repo_path, check=True)
 
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status_message = 'Running OWASP Dependency Check'
+                scan.progress_percentage = 70
+                session.commit()
+
         # Create a unique output directory for this scan
         output_dir = os.path.join(DATA_DIR, f"depcheck_{uuid.uuid4().hex}")
         logger.info(f"Created output directory: {output_dir}")
@@ -296,13 +484,16 @@ def run_dependency_check(repo_path):
             '--format', 'HTML',
             '--out', output_dir,
             '--enableExperimental',
-            '--log', os.path.join(output_dir, 'dependency-check.log')  # Add specific log file
+            '--log', os.path.join(output_dir, 'dependency-check.log')
         ], check=True, capture_output=True)
-        
-        logger.info(f"Dependency check completed. Output saved to: {output_dir}")
-        if result.stderr:
-            logger.warning(f"Dependency check stderr: {result.stderr.decode()}")
-        
+
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status_message = 'Processing dependency check results'
+                scan.progress_percentage = 80
+                session.commit()
+
         # Read and parse the JSON results
         with open(os.path.join(output_dir, "dependency-check-report.json"), 'r') as f:
             results = json.load(f)
@@ -334,6 +525,12 @@ def run_dependency_check(repo_path):
                     enhanced_dependencies.append(dependency)
                 results['results']['dependencies'] = enhanced_dependencies
 
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.progress_percentage = 90
+                session.commit()
+
         return {
             'success': True,
             'results': results,
@@ -341,6 +538,18 @@ def run_dependency_check(repo_path):
             'html_report': os.path.join(output_dir, "dependency-check-report.html")
         }
     except subprocess.CalledProcessError as e:
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status = 'failed'
+                scan.error_message = f'Dependency-Check analysis failed: {str(e)}'
+                session.commit()
         return {'error': f'Dependency-Check analysis failed: {str(e)}'}
     except Exception as e:
+        if session and scan_id:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status = 'failed'
+                scan.error_message = f'Dependency-Check processing failed: {str(e)}'
+                session.commit()
         return {'error': f'Dependency-Check processing failed: {str(e)}'}

@@ -30,3 +30,11 @@ results
 - CodeQL static analysis scanning
 - OWASP Dependency-Check for vulnerable dependencies
 - Local database storage of scan results
+
+## Table of Contents
+
+1. [Architecture Overview](./architecture/README.md)
+2. [Development Guide](./development/README.md)
+3. [API Documentation](./api/README.md)
+4. [Setup Guide](./setup/README.md)
+5. [Contributing Guide](./CONTRIBUTING.md)
