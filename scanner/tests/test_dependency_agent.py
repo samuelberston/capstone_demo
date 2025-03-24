@@ -321,5 +321,35 @@ def test_dependency_agent():
         logger.error(f"Error in dependency agent test: {str(e)}", exc_info=True)
         raise
 
+def test_jwt_vulnerability_analysis():
+    """Test analysis of express-jwt vulnerability"""
+    repo_path = "/Users/samuelberston/Documents/MICS/courses/capstone/demo/juice-shop"
+    
+    # Load the JWT finding from file
+    with open('scanner/data/dependency-check-jwt.json', 'r') as f:
+        jwt_finding = json.load(f)
+    
+    agent = DependencyAnalysisAgent(repo_path=repo_path)
+    
+    # Create dependency info
+    dependency = {
+        'name': 'express-jwt',
+        'version': '0.1.3',
+        'context': jwt_finding
+    }
+    
+    result = agent.analyze(dependency)
+    
+    # Validate analysis components
+    assert 'analysis' in result, "Missing analysis"
+    assert 'usage_patterns' in result, "Missing usage patterns"
+    assert 'exploitability' in result, "Missing exploitability assessment"
+    
+    print("\nJWT Vulnerability Analysis:")
+    print("-" * 50)
+    print(f"Usage Patterns:\n{result['usage_patterns']}\n")
+    print(f"Exploitability:\n{result['exploitability']}\n")
+    print(f"Recommendations:\n{result['analysis']}\n")
+
 if __name__ == "__main__":
     test_dependency_agent()

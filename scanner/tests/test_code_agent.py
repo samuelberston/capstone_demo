@@ -571,6 +571,38 @@ def test_critical_juice_shop_findings():
         logger.error(f"Test failed: {str(e)}", exc_info=True)
         raise
 
+def test_xss_analysis():
+    """Test detailed XSS vulnerability analysis"""
+    repo_path = "/Users/samuelberston/Documents/MICS/courses/capstone/demo/juice-shop"
+    
+    # Load the XSS finding from file
+    with open('scanner/data/juice-shop-xss.json', 'r') as f:
+        xss_finding = json.load(f)
+    
+    agent = CodeAnalysisAgent(repo_path=repo_path)
+    result = agent.analyze(xss_finding)
+    
+    # Validate analysis quality
+    assert 'analysis' in result, "Missing analysis in result"
+    analysis = result['analysis']
+    
+    # Check for key XSS analysis components
+    required_analysis_points = [
+        'input validation',
+        'sanitization',
+        'output encoding',
+        'data flow',
+        'recommendations'
+    ]
+    
+    for point in required_analysis_points:
+        assert point in analysis.lower(), f"Analysis missing {point} discussion"
+    
+    print("\nXSS Analysis Results:")
+    print("-" * 50)
+    print(f"Code Context:\n{result.get('code_context')}\n")
+    print(f"Analysis:\n{analysis}\n")
+
 if __name__ == "__main__":
 #    test_xss_finding()
     test_critical_juice_shop_findings()

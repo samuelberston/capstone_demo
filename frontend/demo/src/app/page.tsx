@@ -1,6 +1,50 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import Image from "next/image";
+import { ScanProgress } from '@/components/ScanProgress';
+import { Scan } from '@/types/scan';
 
 export default function Home() {
+  const [scan, setScan] = useState<Scan | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const pollScanStatus = async () => {
+      try {
+        const response = await fetch('/api/scan/status');
+        const data = await response.json();
+        setScan(data);
+      } catch (error) {
+        console.error('Error polling scan status:', error);
+      }
+    };
+
+    if (isLoading) {
+      const interval = setInterval(pollScanStatus, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [isLoading]);
+
+  const startScan = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/scan/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          repo_url: 'https://github.com/juice-shop/juice-shop.git',
+        }),
+      });
+      const data = await response.json();
+      setScan(data);
+    } catch (error) {
+      console.error('Error starting scan:', error);
+    }
+  };
+
   return (
     <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
       <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
@@ -48,6 +92,22 @@ export default function Home() {
             Read our docs
           </a>
         </div>
+
+        <div className="mb-8">
+          <button
+            onClick={startScan}
+            disabled={isLoading}
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50"
+          >
+            {isLoading ? 'Scanning...' : 'Start Scan'}
+          </button>
+        </div>
+
+        {scan && (
+          <div className="w-full max-w-4xl">
+            <ScanProgress scan={scan} />
+          </div>
+        )}
       </main>
       <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
         <a

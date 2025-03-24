@@ -64,64 +64,28 @@ def create_app():
                     if not detected_languages:
                         detected_languages = ['python']
 
-                    combined_results = []
-                    saved_files = []
-
-                    # Run CodeQL analysis for each detected language
-                    for lang in detected_languages:
-                        # Update scan status
-                        scan = session.query(Scan).filter_by(id=scan_id).first()
-                        if scan:
-                            scan.status_message = f'Running CodeQL analysis for {lang}'
-                            scan.progress_percentage = 20
-                            session.commit()
-
-                        analysis = run_codeql_analysis(temp_dir, lang)
-                        
-                        if not analysis.get("success"):
-                            scan = session.query(Scan).filter_by(id=scan_id).first()
-                            if scan:
-                                scan.status = 'failed'
-                                scan.error_message = analysis.get("error", "Unknown error during CodeQL analysis")
-                                session.commit()
-                            return
-
-                        # Extract results from the analysis
-                        results = analysis.get("results", {}).get("runs", [{}])[0].get("results", [])
-                        combined_results.extend(results)
-
-                    # Run OWASP Dependency-Check
-                    if session and scan_id:
-                        scan = session.query(Scan).filter_by(id=scan_id).first()
-                        if scan:
-                            scan.status_message = 'Installing project dependencies'
-                            scan.progress_percentage = 65
-                            session.commit()
-
-                    dependency_check_results = run_dependency_check(temp_dir, session, scan_id)
+                    # Create threads for parallel execution
+                    codeql_thread = threading.Thread(
+                        target=run_codeql_scans,
+                        args=(temp_dir, detected_languages, scan_id, Session())
+                    )
                     
-                    if 'error' in dependency_check_results:
-                        scan = session.query(Scan).filter_by(id=scan_id).first()
-                        if scan:
-                            scan.status = 'failed'
-                            scan.error_message = dependency_check_results['error']
-                            session.commit()
-                        return
+                    dependency_thread = threading.Thread(
+                        target=run_dependency_scan,
+                        args=(temp_dir, scan_id, Session())
+                    )
 
-                    # Store results in database
-                    for finding in combined_results:
-                        codeql_finding = CodeQLFinding(
-                            scan_id=scan_id,
-                            rule_id=finding.get('ruleId'),
-                            message=finding.get('message', {}).get('text'),
-                            file_path=finding.get('locations', [{}])[0].get('physicalLocation', {}).get('artifactLocation', {}).get('uri'),
-                            start_line=finding.get('locations', [{}])[0].get('physicalLocation', {}).get('region', {}).get('startLine'),
-                            raw_data=finding
-                        )
-                        session.add(codeql_finding)
-                    
+                    # Start both scans in parallel
+                    codeql_thread.start()
+                    dependency_thread.start()
+
+                    # Wait for both scans to complete
+                    codeql_thread.join()
+                    dependency_thread.join()
+
+                    # Update final scan status
                     scan = session.query(Scan).filter_by(id=scan_id).first()
-                    if scan:
+                    if scan and scan.status != 'failed':
                         scan.status = 'completed'
                         scan.progress_percentage = 100
                         scan.status_message = 'Scan completed successfully'
@@ -141,6 +105,75 @@ def create_app():
                         scan.status = 'failed'
                         scan.error_message = f'Analysis failed: {str(e)}'
                         session.commit()
+        finally:
+            session.close()
+    
+    def run_codeql_scans(temp_dir, detected_languages, scan_id, session):
+        try:
+            combined_results = []
+            
+            # Run CodeQL analysis for each detected language
+            for lang in detected_languages:
+                scan = session.query(Scan).filter_by(id=scan_id).first()
+                if scan:
+                    scan.status_message = f'Running CodeQL analysis for {lang}'
+                    scan.progress_percentage = 20
+                    session.commit()
+
+                analysis = run_codeql_analysis(temp_dir, lang)
+                
+                if not analysis.get("success"):
+                    scan = session.query(Scan).filter_by(id=scan_id).first()
+                    if scan:
+                        scan.status = 'failed'
+                        scan.error_message = analysis.get("error", "Unknown error during CodeQL analysis")
+                        session.commit()
+                    return
+
+                results = analysis.get("results", {}).get("runs", [{}])[0].get("results", [])
+                combined_results.extend(results)
+
+            # Store results in database
+            for finding in combined_results:
+                codeql_finding = CodeQLFinding(
+                    scan_id=scan_id,
+                    rule_id=finding.get('ruleId'),
+                    message=finding.get('message', {}).get('text'),
+                    file_path=finding.get('locations', [{}])[0].get('physicalLocation', {}).get('artifactLocation', {}).get('uri'),
+                    start_line=finding.get('locations', [{}])[0].get('physicalLocation', {}).get('region', {}).get('startLine'),
+                    raw_data=finding
+                )
+                session.add(codeql_finding)
+            session.commit()
+        
+        except Exception as e:
+            logger.error(f"CodeQL analysis error: {str(e)}", exc_info=True)
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status = 'failed'
+                scan.error_message = f'CodeQL analysis failed: {str(e)}'
+                session.commit()
+        finally:
+            session.close()
+
+    def run_dependency_scan(temp_dir, scan_id, session):
+        try:
+            dependency_check_results = run_dependency_check(temp_dir, session, scan_id)
+            
+            if 'error' in dependency_check_results:
+                scan = session.query(Scan).filter_by(id=scan_id).first()
+                if scan:
+                    scan.status = 'failed'
+                    scan.error_message = dependency_check_results['error']
+                    session.commit()
+        
+        except Exception as e:
+            logger.error(f"Dependency check error: {str(e)}", exc_info=True)
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            if scan:
+                scan.status = 'failed'
+                scan.error_message = f'Dependency check failed: {str(e)}'
+                session.commit()
         finally:
             session.close()
     
@@ -228,8 +261,8 @@ def create_app():
                         'llm_verification': f.llm_verification,
                         'llm_exploitability': f.llm_exploitability,
                         'llm_priority': f.llm_priority,
-                        'code_context': f.code_context,
-                        'analysis': f.analysis
+                        'code_context': getattr(f, 'code_context', None),
+                        'analysis': f.raw_data.get('analysis', {}) if f.raw_data else {}
                     } for f in scan.codeql_findings],
                     'dependency_findings': [{
                         'id': f.id,
@@ -243,7 +276,7 @@ def create_app():
                         'description': f.description,
                         'llm_exploitability': f.llm_exploitability,
                         'llm_priority': f.llm_priority,
-                        'analysis': f.analysis
+                        'analysis': f.raw_data.get('analysis', {}) if f.raw_data else {}
                     } for f in scan.dependency_findings]
                 } for scan in scans]
             })

@@ -41,6 +41,8 @@ class CodeQLFinding(Base):
     llm_remediation = Column(Text)
     llm_priority = Column(Text)
     raw_data = Column(JSON)
+    code_context = Column(Text)
+    analysis = Column(JSON)
     
     scan = relationship("Scan", back_populates="codeql_findings")
 

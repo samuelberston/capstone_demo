@@ -231,8 +231,8 @@ File Location: {finding.get('locations', [{}])[0].get('physicalLocation', {}).ge
             end_line = end_line - 1
             
             # Add context by including a few lines before and after
-            context_start = max(0, start_line - 3)
-            context_end = min(len(lines), end_line + 3)
+            context_start = max(0, start_line - 2)
+            context_end = min(len(lines), end_line + 2)
             
             # Extract the relevant lines
             context_lines = lines[context_start:context_end]
@@ -240,7 +240,14 @@ File Location: {finding.get('locations', [{}])[0].get('physicalLocation', {}).ge
             # Format the context with line numbers (convert back to 1-based for display)
             formatted_context = ""
             for i, line in enumerate(context_lines, start=context_start + 1):
-                marker = "→ " if start_line + 1 <= i <= end_line + 1 else "  "
+                # Only mark lines with arrows if they contain actual code (not just braces)
+                line_content = line.strip()
+                is_vulnerable_line = start_line + 1 <= i <= end_line + 1
+                # Don't mark lines that only contain braces
+                if is_vulnerable_line and line_content not in ['{', '}']:
+                    marker = "→ "
+                else:
+                    marker = "  "
                 formatted_context += f"{marker}{i}: {line}"
                 
             return formatted_context

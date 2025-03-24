@@ -188,11 +188,61 @@ def run_codeql_analysis(repo_path: str, language: str) -> Dict[str, Any]:
             "error": f"Error running CodeQL analysis: {str(e)}"
         }
 
+def get_dependency_cache_key(repo_path: str) -> str:
+    """Generate a unique cache key for dependency check results."""
+    repo_hash = str(hash(repo_path))
+    return f"depcheck_{repo_hash}"
+
+def get_cached_dependency_results(repo_path: str) -> dict:
+    """Check if there are cached dependency check results less than 24 hours old."""
+    cache_key = get_dependency_cache_key(repo_path)
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
+    
+    if os.path.exists(cache_file):
+        with open(cache_file, 'r') as f:
+            cached_data = json.load(f)
+            cache_time = datetime.fromtimestamp(cached_data['timestamp'])
+            
+            if datetime.now() - cache_time < timedelta(hours=24):
+                logger.info(f"Using cached dependency check results for {repo_path}")
+                return cached_data['results']
+    return None
+
+def save_dependency_results_to_cache(repo_path: str, results: dict) -> None:
+    """Save dependency check results to cache."""
+    cache_key = get_dependency_cache_key(repo_path)
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
+    
+    cache_data = {
+        'timestamp': time.time(),
+        'results': results
+    }
+    
+    with open(cache_file, 'w') as f:
+        json.dump(cache_data, f)
+        logger.info(f"Saved dependency check results to cache: {cache_file}")
+
 def run_dependency_check(repo_path, session=None, scan_id=None):
     """
     Run OWASP Dependency-Check on the repository and return results.
     """
     try:
+        # Check cache first
+        cached_results = get_cached_dependency_results(repo_path)
+        if cached_results:
+            logger.info("Using cached dependency check results")
+            if session and scan_id:
+                scan = session.query(Scan).filter_by(id=scan_id).first()
+                if scan:
+                    scan.status_message = 'Using cached dependency check results'
+                    scan.progress_percentage = 90
+                    session.commit()
+            return {
+                'success': True,
+                'results': cached_results,
+                'cached': True
+            }
+
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
@@ -288,21 +338,44 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
                 scan.progress_percentage = 70
                 session.commit()
 
+        # Get NVD API key from environment
+        nvd_api_key = os.getenv('NVD_API_KEY')
+        if not nvd_api_key:
+            logger.warning("NVD API key not found in environment variables")
+
         # Create a unique output directory for this scan
         output_dir = os.path.join(DATA_DIR, f"depcheck_{uuid.uuid4().hex}")
         logger.info(f"Created output directory: {output_dir}")
         
-        # Run dependency-check with verbose output
-        logger.info("Starting OWASP Dependency Check scan...")
-        result = subprocess.run([
+        # Run dependency-check with NVD API key
+        cmd = [
             'dependency-check',
             '--scan', repo_path,
             '--format', 'JSON',
             '--format', 'HTML',
             '--out', output_dir,
             '--enableExperimental',
-            '--log', os.path.join(output_dir, 'dependency-check.log')
-        ], check=True, capture_output=True)
+            '--failOnCVSS', '7'
+        ]
+
+        # Add NVD API key if available
+        if nvd_api_key:
+            cmd.extend(['--nvdApiKey', nvd_api_key])
+            logger.info("Using NVD API key for faster updates")
+
+        # Add error handling for the subprocess
+        try:
+            result = subprocess.run(cmd, 
+                                  check=True, 
+                                  capture_output=True,
+                                  text=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Dependency check process failed: {e.stderr}")
+            # Check if we got partial results despite errors
+            if os.path.exists(os.path.join(output_dir, "dependency-check-report.json")):
+                logger.info("Partial results found, continuing with analysis")
+            else:
+                raise
 
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()
@@ -364,11 +437,15 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
                 scan.progress_percentage = 90
                 session.commit()
 
+        if 'success' in results and results['success']:
+            save_dependency_results_to_cache(repo_path, results)
+            
         return {
             'success': True,
             'results': results,
             'json_report': os.path.join(output_dir, "dependency-check-report.json"),
-            'html_report': os.path.join(output_dir, "dependency-check-report.html")
+            'html_report': os.path.join(output_dir, "dependency-check-report.html"),
+            'cached': False
         }
     except subprocess.CalledProcessError as e:
         if session and scan_id:
@@ -377,7 +454,7 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
                 scan.status = 'failed'
                 scan.error_message = f'Dependency-Check analysis failed: {str(e)}'
                 session.commit()
-        return {'error': f'Dependency-Check analysis failed: {str(e)}'}
+        return {'error': f'DeWpendency-Check analysis failed: {str(e)}'}
     except Exception as e:
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()

@@ -11,6 +11,25 @@ export interface Scan {
   error_message?: string;
   codeql_findings: CodeQLFinding[];
   dependency_findings: DependencyCheckFinding[];
+  progress_details?: ScanProgressDetails;
+}
+
+export interface ScanProgressDetails {
+  current_step: string;
+  step_progress: number;
+  total_steps: number;
+  current_step_details: {
+    dependencies_analyzed?: number;
+    total_dependencies?: number;
+    vulnerabilities_found?: number;
+    estimated_time_remaining?: string;
+  };
+  step_history: {
+    step: string;
+    start_time: string;
+    end_time?: string;
+    status: 'completed' | 'running' | 'failed';
+  }[];
 }
 
 export interface CodeQLFinding {
