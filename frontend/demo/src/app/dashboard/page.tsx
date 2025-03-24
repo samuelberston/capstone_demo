@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Toaster, toast } from 'react-hot-toast'
 import criticalFindings from './juice-shop-critical-findings.json'
 import { Scan } from '@/types/scan'
+import { ScanProgress } from '@/components/ScanProgress'
 
 // Convert the JSON findings into the expected Scan format
 const dummyData: Scan[] = [{
@@ -90,6 +91,27 @@ const LoadingSpinner = () => (
     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
   </div>
 );
+
+// Add this helper function
+const getScanStatus = (scan: Scan) => {
+  // If overall status is failed, return failed
+  if (scan.status === 'failed') return 'failed';
+  
+  // If both analyses are complete, return completed
+  if (scan.codeql_status === 'completed' && scan.dependency_status === 'completed') {
+    return 'completed';
+  }
+  
+  // If either analysis is running, return running with details
+  if (scan.codeql_status === 'running' || scan.dependency_status === 'running') {
+    const details = [];
+    if (scan.codeql_status === 'running') details.push('CodeQL');
+    if (scan.dependency_status === 'running') details.push('Dependency');
+    return `running (${details.join(', ')})`;
+  }
+  
+  return scan.status;
+};
 
 export default function Dashboard() {
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null)
@@ -437,14 +459,14 @@ export default function Dashboard() {
               className={`border rounded-lg p-6 transition-all duration-200 
                 ${selectedScan?.id === scan.id 
                   ? 'border-blue-500 ring-2 ring-blue-200' 
-                  : scan.status === 'running'
+                  : getScanStatus(scan).startsWith('running')
                     ? 'border-blue-400 animate-[pulse_2s_ease-in-out_infinite] hover:border-blue-300'
-                    : scan.status === 'completed' && (scan.codeql_findings?.length > 0 || scan.dependency_findings?.length > 0)
+                    : getScanStatus(scan).startsWith('completed') && (scan.codeql_findings?.length > 0 || scan.dependency_findings?.length > 0)
                       ? 'hover:border-gray-300 hover:shadow-md cursor-pointer'
                       : 'border-gray-700'}`}
               onClick={() => {
                 // Only allow clicking if scan is completed and has findings
-                if (scan.status === 'completed' && 
+                if (getScanStatus(scan).startsWith('completed') && 
                     (scan.codeql_findings?.length > 0 || scan.dependency_findings?.length > 0)) {
                   handleScanClick(scan)
                 }
@@ -456,44 +478,27 @@ export default function Dashboard() {
                   <p className="text-sm text-gray-400">Branch: {scan.branch}</p>
                 </div>
                 <span className={`text-sm px-3 py-1 rounded-full flex items-center gap-2 ${
-                  scan.status === 'completed' ? 'bg-green-500/15 text-green-500 font-medium' : 
-                  scan.status === 'running' ? 'bg-blue-500/15 text-blue-500 font-medium animate-pulse' : 
+                  getScanStatus(scan).startsWith('completed') ? 'bg-green-500/15 text-green-500 font-medium' : 
+                  getScanStatus(scan).startsWith('running') ? 'bg-blue-500/15 text-blue-500 font-medium animate-pulse' : 
                   'bg-yellow-500/15 text-yellow-500 font-medium'
                 }`}>
-                  {scan.status === 'running' && (
+                  {getScanStatus(scan).startsWith('running') && (
                     <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-500"></div>
                   )}
-                  {scan.status}
+                  {getScanStatus(scan)}
                 </span>
               </div>
-              {scan.status === 'running' && (
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm text-gray-400 mb-1">
-                    <span>{scan.current_step?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
-                    <span>{scan.progress_percentage}%</span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2">
-                    <div 
-                      className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${scan.progress_percentage || 0}%` }}
-                    ></div>
-                  </div>
-                  {scan.status_message && (
-                    <p className="text-sm text-gray-400 mt-2">{scan.status_message}</p>
-                  )}
-                </div>
-              )}
-              {scan.status === 'failed' && scan.error_message && (
-                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                  <p className="text-sm text-red-400">{scan.error_message}</p>
-                </div>
+              {scan.status === 'running' && scan.status_message && (
+                <p className="text-sm text-gray-400 mt-2">
+                  {scan.status_message}
+                </p>
               )}
               <div className="space-y-1">
                 <p className="text-sm text-gray-600">
                   <span className="inline-block w-20">Commit:</span>
                   {scan.commit_hash ? (
                     <span className="font-mono">{scan.commit_hash}</span>
-                  ) : scan.status === 'running' ? (
+                  ) : getScanStatus(scan).startsWith('running') ? (
                     <span className="text-gray-400">Fetching...</span>
                   ) : (
                     <span className="text-gray-400">N/A</span>
@@ -516,11 +521,18 @@ export default function Dashboard() {
               </div>
 
               {/* Add a message when scan is completed but has no findings */}
-              {scan.status === 'completed' && 
+              {getScanStatus(scan).startsWith('completed') && 
                !scan.codeql_findings?.length && 
                !scan.dependency_findings?.length && (
                 <div className="mt-4 text-sm text-gray-400">
                   No vulnerabilities found
+                </div>
+              )}
+
+              {/* Add progress bar for running scans */}
+              {scan.status === 'running' && (
+                <div className="mt-4">
+                  <ScanProgress scan={scan} />
                 </div>
               )}
             </div>

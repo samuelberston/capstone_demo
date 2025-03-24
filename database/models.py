@@ -19,6 +19,11 @@ class Scan(Base):
     status_message = Column(Text)  # Detailed status message
     error_message = Column(Text)  # Detailed error message if failed
     
+    # Add new fields for parallel task tracking
+    codeql_status = Column(String(50), default='pending')  # pending, running, completed, failed
+    dependency_status = Column(String(50), default='pending')  # pending, running, completed, failed
+    start_time = Column(DateTime)  # Track when scan started for time estimates
+    
     codeql_findings = relationship("CodeQLFinding", back_populates="scan")
     dependency_findings = relationship("DependencyCheckFinding", back_populates="scan")
 

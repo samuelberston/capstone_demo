@@ -227,28 +227,10 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
     Run OWASP Dependency-Check on the repository and return results.
     """
     try:
-        # Check cache first
-        cached_results = get_cached_dependency_results(repo_path)
-        if cached_results:
-            logger.info("Using cached dependency check results")
-            if session and scan_id:
-                scan = session.query(Scan).filter_by(id=scan_id).first()
-                if scan:
-                    scan.status_message = 'Using cached dependency check results'
-                    scan.progress_percentage = 90
-                    session.commit()
-            return {
-                'success': True,
-                'results': cached_results,
-                'cached': True
-            }
-
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
-                scan.current_step = 'dependency_check'
-                scan.progress_percentage = 60
-                scan.status_message = 'Starting dependency check analysis'
+                scan.status_message = 'Dependency Check: Installing npm packages - Est. 3-5 mins'
                 session.commit()
 
         # Initialize the dependency analysis agent
@@ -334,8 +316,7 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
-                scan.status_message = 'Running OWASP Dependency Check'
-                scan.progress_percentage = 70
+                scan.status_message = 'Dependency Check: Analyzing vulnerabilities - Est. 5-7 mins'
                 session.commit()
 
         # Get NVD API key from environment
@@ -355,7 +336,8 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
             '--format', 'HTML',
             '--out', output_dir,
             '--enableExperimental',
-            '--failOnCVSS', '7'
+            '--failOnCVSS', '7',
+            '--suppress-update'  # Add this to reduce warnings
         ]
 
         # Add NVD API key if available
@@ -380,8 +362,7 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
-                scan.status_message = 'Processing dependency check results'
-                scan.progress_percentage = 80
+                scan.status_message = 'Dependency Check: Processing results - Est. 1-2 mins'
                 session.commit()
 
         # Read and parse the JSON results

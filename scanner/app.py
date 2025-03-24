@@ -29,7 +29,16 @@ def create_app():
     def run_scan(scan_id, github_url, session):
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
+                scan = session.query(Scan).filter_by(id=scan_id).first()
+                if scan:
+                    # Initialize progress tracking
+                    scan.current_step = 'cloning'
+                    scan.progress_percentage = 0
+                    scan.status_message = 'Starting repository clone'
+                    session.commit()
+
                 try:
+                    # Cloning (0-20%)
                     logger.info("Cloning repository...")
                     repo = git.Repo.clone_from(
                         github_url,
@@ -39,6 +48,24 @@ def create_app():
                         allow_unsafe_options=True
                     )
                     
+                    scan.progress_percentage = 20
+                    scan.current_step = 'language_detection'
+                    scan.status_message = 'Repository cloned, detecting languages'
+                    session.commit()
+
+                    # Language detection (20-30%)
+                    logger.info("Detecting languages...")
+                    detected_languages = detect_all_languages(temp_dir)
+                    
+                    scan.progress_percentage = 30
+                    scan.status_message = f'Detected languages: {", ".join(detected_languages)}'
+                    session.commit()
+
+                    # Start parallel scans (30-100%)
+                    scan.current_step = 'scanning'
+                    scan.status_message = 'Running security scans'
+                    session.commit()
+
                     # Get the commit hash
                     commit_hash = repo.head.object.hexsha[:7]
                     logger.info(f"Got commit hash: {commit_hash}")
@@ -56,10 +83,6 @@ def create_app():
                     
                     # Refresh the session to ensure we have the latest data
                     session.refresh(scan)
-                    
-                    logger.info("Detecting languages...")
-                    detected_languages = detect_all_languages(temp_dir)
-                    logger.debug(f"Detected languages: {detected_languages}")
                     
                     if not detected_languages:
                         detected_languages = ['python']
@@ -91,6 +114,12 @@ def create_app():
                         scan.status_message = 'Scan completed successfully'
                         session.commit()
 
+                    # Add parallel task tracking
+                    scan.codeql_status = 'completed'
+                    scan.dependency_status = 'completed'
+                    scan.status_message = 'Running CodeQL and Dependency analyses'
+                    session.commit()
+
                 except git.GitCommandError as e:
                     logger.error(f"Git clone error: {str(e)}")
                     scan = session.query(Scan).filter_by(id=scan_id).first()
@@ -110,47 +139,29 @@ def create_app():
     
     def run_codeql_scans(temp_dir, detected_languages, scan_id, session):
         try:
-            combined_results = []
-            
-            # Run CodeQL analysis for each detected language
-            for lang in detected_languages:
-                scan = session.query(Scan).filter_by(id=scan_id).first()
-                if scan:
-                    scan.status_message = f'Running CodeQL analysis for {lang}'
-                    scan.progress_percentage = 20
-                    session.commit()
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            start_time = datetime.utcnow()
+
+            for idx, lang in enumerate(detected_languages):
+                scan.status_message = f'CodeQL: {lang} ({idx + 1}/{len(detected_languages)}) - Est. {(len(detected_languages) - idx) * 2} mins remaining'
+                session.commit()
 
                 analysis = run_codeql_analysis(temp_dir, lang)
                 
                 if not analysis.get("success"):
-                    scan = session.query(Scan).filter_by(id=scan_id).first()
-                    if scan:
-                        scan.status = 'failed'
-                        scan.error_message = analysis.get("error", "Unknown error during CodeQL analysis")
-                        session.commit()
+                    scan.codeql_status = 'failed'  # Update specific status
+                    scan.error_message = analysis.get("error")
+                    session.commit()
                     return
 
-                results = analysis.get("results", {}).get("runs", [{}])[0].get("results", [])
-                combined_results.extend(results)
-
-            # Store results in database
-            for finding in combined_results:
-                codeql_finding = CodeQLFinding(
-                    scan_id=scan_id,
-                    rule_id=finding.get('ruleId'),
-                    message=finding.get('message', {}).get('text'),
-                    file_path=finding.get('locations', [{}])[0].get('physicalLocation', {}).get('artifactLocation', {}).get('uri'),
-                    start_line=finding.get('locations', [{}])[0].get('physicalLocation', {}).get('region', {}).get('startLine'),
-                    raw_data=finding
-                )
-                session.add(codeql_finding)
+            scan.codeql_status = 'completed'
             session.commit()
-        
+
         except Exception as e:
             logger.error(f"CodeQL analysis error: {str(e)}", exc_info=True)
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
-                scan.status = 'failed'
+                scan.codeql_status = 'failed'
                 scan.error_message = f'CodeQL analysis failed: {str(e)}'
                 session.commit()
         finally:
@@ -158,20 +169,28 @@ def create_app():
 
     def run_dependency_scan(temp_dir, scan_id, session):
         try:
+            scan = session.query(Scan).filter_by(id=scan_id).first()
+            start_time = datetime.utcnow()
+            
+            scan.status_message = 'Dependency Check: Installing dependencies - Est. 5-10 mins'
+            session.commit()
+            
             dependency_check_results = run_dependency_check(temp_dir, session, scan_id)
             
             if 'error' in dependency_check_results:
-                scan = session.query(Scan).filter_by(id=scan_id).first()
-                if scan:
-                    scan.status = 'failed'
-                    scan.error_message = dependency_check_results['error']
-                    session.commit()
-        
+                scan.dependency_status = 'failed'  # Update specific status
+                scan.error_message = dependency_check_results['error']
+                session.commit()
+                return
+
+            scan.dependency_status = 'completed'
+            session.commit()
+
         except Exception as e:
             logger.error(f"Dependency check error: {str(e)}", exc_info=True)
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
-                scan.status = 'failed'
+                scan.dependency_status = 'failed'
                 scan.error_message = f'Dependency check failed: {str(e)}'
                 session.commit()
         finally:
@@ -251,6 +270,9 @@ def create_app():
                     'progress_percentage': scan.progress_percentage,
                     'status_message': scan.status_message,
                     'error_message': scan.error_message,
+                    'current_step': scan.current_step,
+                    'codeql_status': scan.codeql_status,
+                    'dependency_status': scan.dependency_status,
                     'codeql_findings': [{
                         'id': f.id,
                         'scan_id': f.scan_id,

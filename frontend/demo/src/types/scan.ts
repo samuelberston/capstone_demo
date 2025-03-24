@@ -4,14 +4,17 @@ export interface Scan {
   branch: string;
   commit_hash: string;
   scan_date: string;
-  status: string;
-  current_step?: string;
-  progress_percentage?: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  current_step?: 'cloning' | 'language_detection' | 'scanning';
+  progress_percentage: number;
   status_message?: string;
   error_message?: string;
+  // Add new fields for parallel task tracking
+  codeql_status: 'pending' | 'running' | 'completed' | 'failed';
+  dependency_status: 'pending' | 'running' | 'completed' | 'failed';
+  start_time?: string;
   codeql_findings: CodeQLFinding[];
   dependency_findings: DependencyCheckFinding[];
-  progress_details?: ScanProgressDetails;
 }
 
 export interface ScanProgressDetails {
@@ -36,11 +39,16 @@ export interface CodeQLFinding {
   id: number;
   scan_id: number;
   rule_id: string;
+  rule_index?: number;
   message: string;
   file_path: string;
   start_line: number;
+  start_column?: number;
+  end_column?: number;
+  fingerprint?: string;
   llm_verification: string;
   llm_exploitability: string;
+  llm_remediation?: string;
   llm_priority: string;
   code_context?: string;
   analysis?: {
@@ -50,6 +58,7 @@ export interface CodeQLFinding {
     recommendations: string[];
     vulnerableCode: string;
   };
+  raw_data?: any;
 }
 
 export interface DependencyCheckFinding {
@@ -63,9 +72,11 @@ export interface DependencyCheckFinding {
   cvss_score: number;
   description: string;
   llm_exploitability: string;
+  llm_remediation?: string;
   llm_priority: string;
   analysis?: {
     description: string;
     recommendations: string[];
   };
+  raw_data?: any;
 } 
