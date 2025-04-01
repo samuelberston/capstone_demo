@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export interface Scan {
   id: number;
   repository_url: string;
@@ -72,11 +73,12 @@ export interface DependencyCheckFinding {
   cvss_score: number;
   description: string;
   llm_exploitability: string;
-  llm_remediation?: string;
   llm_priority: string;
-  analysis?: {
+  code_context?: string;
+  analysis: {
     description: string;
+    dataFlow?: string;
     recommendations: string[];
+    vulnerableCode?: string;
   };
-  raw_data?: any;
 } 

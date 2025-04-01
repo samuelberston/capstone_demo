@@ -336,8 +336,7 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
             '--format', 'HTML',
             '--out', output_dir,
             '--enableExperimental',
-            '--failOnCVSS', '7',
-            '--suppress-update'  # Add this to reduce warnings
+            '--failOnCVSS', '7'
         ]
 
         # Add NVD API key if available

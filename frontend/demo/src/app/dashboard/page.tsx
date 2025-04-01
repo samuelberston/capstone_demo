@@ -5,6 +5,7 @@ import { Toaster, toast } from 'react-hot-toast'
 import criticalFindings from './juice-shop-critical-findings.json'
 import { Scan } from '@/types/scan'
 import { ScanProgress } from '@/components/ScanProgress'
+import { CodeQLFinding, DependencyCheckFinding } from '@/types/scan'
 
 // Convert the JSON findings into the expected Scan format
 const dummyData: Scan[] = [{
@@ -14,6 +15,9 @@ const dummyData: Scan[] = [{
   commit_hash: "9e4b255",
   scan_date: new Date().toISOString(),
   status: "completed",
+  codeql_status: "completed",
+  dependency_status: "completed",
+  progress_percentage: 100,
   codeql_findings: criticalFindings.results.map(finding => ({
     id: 1,
     scan_id: 1,
@@ -33,7 +37,58 @@ const dummyData: Scan[] = [{
       vulnerableCode: finding.analysis.vulnerableCode || finding.code_context || "No vulnerable code available"
     }
   })),
-  dependency_findings: [] // No dependency findings in the critical findings JSON
+  dependency_findings: [
+    {
+      id: 1,
+      scan_id: 1,
+      dependency_name: "express-jwt",
+      dependency_version: "0.1.3",
+      vulnerability_id: "CVE-2020-15084",
+      vulnerability_name: "Authorization Bypass in express-jwt",
+      severity: "CRITICAL",
+      cvss_score: 9.1,
+      description: "In express-jwt (NPM package) up and including version 5.3.3, the algorithms entry to be specified in the configuration is not being enforced. When algorithms is not specified in the configuration, with the combination of jwks-rsa, it may lead to authorization bypass.",
+      llm_exploitability: "High - The vulnerability allows attackers to bypass authorization checks when using jwks-rsa as the secret without proper algorithm validation.",
+      llm_priority: "Critical",
+      code_context: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});",
+      analysis: {
+        description: "The vulnerability exists in the express-jwt middleware where it fails to enforce algorithm validation when using jwks-rsa as the secret. This can lead to authorization bypass attacks.",
+        dataFlow: "The vulnerability occurs in the JWT verification process where the algorithms parameter is not enforced. This allows attackers to potentially bypass authorization by using different signing algorithms than intended.",
+        recommendations: [
+          "Specify algorithms in the express-jwt configuration",
+          "Update to version 6.0.0 or later",
+          "Use proper algorithm validation with jwks-rsa",
+          "Implement proper error handling for invalid tokens"
+        ],
+        vulnerableCode: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});"
+      }
+    },
+    {
+      id: 2,
+      scan_id: 1,
+      dependency_name: "lodash",
+      dependency_version: "4.17.15",
+      vulnerability_id: "CVE-2019-10744",
+      vulnerability_name: "Prototype Pollution in lodash",
+      severity: "HIGH",
+      cvss_score: 7.5,
+      description: "A vulnerability was found in lodash where the merge, mergeWith, and defaultsDeep functions could be tricked into adding or modifying properties of Object.prototype.",
+      llm_exploitability: "High - Attackers can pollute the Object prototype, potentially leading to denial of service or remote code execution.",
+      llm_priority: "High",
+      code_context: "const _ = require('lodash');\n\n// Vulnerable code\nconst userInput = JSON.parse(req.body);\nconst config = _.merge({}, userInput);\n\n// This could pollute Object.prototype\nconst result = _.defaultsDeep({}, userInput);",
+      analysis: {
+        description: "The vulnerability exists in lodash's merge functions where it fails to properly validate input objects, allowing prototype pollution attacks.",
+        dataFlow: "The vulnerability occurs when user-controlled input is passed to lodash's merge functions without proper validation. The merge operation can modify Object.prototype if the input contains specially crafted properties.",
+        recommendations: [
+          "Update to version 4.17.16 or later",
+          "Use Object.freeze() to prevent prototype modification",
+          "Implement proper input validation",
+          "Consider using alternative libraries with better security"
+        ],
+        vulnerableCode: "const _ = require('lodash');\n\n// Vulnerable code\nconst userInput = JSON.parse(req.body);\nconst config = _.merge({}, userInput);\n\n// This could pollute Object.prototype\nconst result = _.defaultsDeep({}, userInput);"
+      }
+    }
+  ]
 }]
 
 const API_BASE = 'http://localhost:5001';
@@ -116,7 +171,7 @@ const getScanStatus = (scan: Scan) => {
 export default function Dashboard() {
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState('code')
+  const [activeTab, setActiveTab] = useState<'code' | 'dependency'>('code')
   const [expandedFinding, setExpandedFinding] = useState<number | null>(null)
   const [newScanData, setNewScanData] = useState({
     repositoryUrl: '',
@@ -128,7 +183,6 @@ export default function Dashboard() {
   const [isMounted, setIsMounted] = useState(false)
   const [scans, setScans] = useState<Scan[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [expandedCards, setExpandedCards] = useState<{[key: string]: boolean}>({})
   
   useEffect(() => {
     setIsMounted(true)
@@ -202,16 +256,30 @@ export default function Dashboard() {
 
   const getVerificationColor = (verification: string | null | undefined): string => {
     if (!verification) return 'bg-yellow-500/15 text-yellow-500'
-    if (verification.toLowerCase().startsWith('true')) return 'bg-green-500/15 text-green-500'
-    if (verification.toLowerCase().startsWith('false')) return 'bg-red-500/15 text-red-500'
+    if (verification.toLowerCase().includes('true')) return 'bg-green-500/15 text-green-500'
+    if (verification.toLowerCase().includes('false')) return 'bg-red-500/15 text-red-500'
     return 'bg-yellow-500/15 text-yellow-500'
   }
 
   const getExploitabilityColor = (exploitability: string): string => {
-    if (exploitability.toLowerCase().startsWith('high')) return 'bg-red-500/15 text-red-500'
-    if (exploitability.toLowerCase().startsWith('medium')) return 'bg-yellow-500/15 text-yellow-500'
-    if (exploitability.toLowerCase().startsWith('low')) return 'bg-blue-500/15 text-blue-500'
+    if (exploitability.toLowerCase().includes('high')) return 'bg-red-500/15 text-red-500'
+    if (exploitability.toLowerCase().includes('medium')) return 'bg-yellow-500/15 text-yellow-500'
+    if (exploitability.toLowerCase().includes('low')) return 'bg-blue-500/15 text-blue-500'
     return 'bg-gray-500/15 text-gray-500'
+  }
+
+  const getVerificationText = (verification: string | null | undefined): string => {
+    if (!verification) return 'Unknown'
+    if (verification.toLowerCase().includes('true')) return 'True Positive'
+    if (verification.toLowerCase().includes('false')) return 'False Positive'
+    return 'Unknown'
+  }
+
+  const getExploitabilityText = (exploitability: string): string => {
+    if (exploitability.toLowerCase().includes('high')) return 'Exploitable'
+    if (exploitability.toLowerCase().includes('medium')) return 'Partially Exploitable'
+    if (exploitability.toLowerCase().includes('low')) return 'Not Exploitable'
+    return 'Unknown'
   }
 
   const handleScanClick = (scan: Scan) => {
@@ -262,7 +330,7 @@ export default function Dashboard() {
   }
 
   const handleFindingClick = (index: number) => {
-    setExpandedFinding(expandedFinding === index ? null : index)
+    setExpandedFinding(prev => prev === index ? null : index);
   }
 
   const formatDate = (dateString: string) => {
@@ -289,13 +357,6 @@ export default function Dashboard() {
       console.error('Error clearing scans:', error);
     }
   };
-
-  const toggleCard = (findingIndex: number, cardType: string) => {
-    setExpandedCards(prev => ({
-      ...prev,
-      [`${findingIndex}-${cardType}`]: !prev[`${findingIndex}-${cardType}`]
-    }))
-  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -610,12 +671,12 @@ export default function Dashboard() {
                         </div>
                         <div className="col-span-2 p-4">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${getVerificationColor(finding.llm_verification)}`}>
-                            {finding.llm_verification?.toLowerCase()?.startsWith('true') ? 'True Positive' : 'False Positive'}
+                            {getVerificationText(finding.llm_verification)}
                           </span>
                         </div>
                         <div className="col-span-2 p-4">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                            {finding.llm_exploitability.toLowerCase().includes('high') ? 'Exploitable' : 'Exploitable'}
+                            {getExploitabilityText(finding.llm_exploitability)}
                           </span>
                         </div>
                         <div className="col-span-1 p-4">
@@ -649,31 +710,16 @@ export default function Dashboard() {
                               <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                                 <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
                                 <div className="relative">
-                                  <p className={`text-gray-300 ${!expandedCards[`${index}-description`] ? 'line-clamp-3' : ''}`}>
-                                    {finding.analysis?.description || finding.message}
-                                  </p>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      toggleCard(index, 'description')
-                                    }}
-                                    className="text-blue-400 hover:text-blue-300 text-sm mt-2 flex items-center gap-1.5 group transition-all duration-200 relative"
+                                  <div 
+                                    id={`${index}-description-content`}
+                                    className="text-gray-300"
                                   >
-                                    <span>{expandedCards[`${index}-description`] ? 'Show Less' : 'Show More'}</span>
-                                    <svg 
-                                      className={`w-4 h-4 transform transition-transform duration-200 ${
-                                        expandedCards[`${index}-description`] ? 'rotate-180' : ''
-                                      }`} 
-                                      fill="none" 
-                                      viewBox="0 0 24 24" 
-                                      stroke="currentColor"
-                                    >
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                    {!expandedCards[`${index}-description`] && (
-                                      <div className="absolute bottom-full left-0 w-full h-8 bg-gradient-to-t from-gray-800/50 to-transparent pointer-events-none"></div>
-                                    )}
-                                  </button>
+                                    {finding.analysis?.description || 
+                                      (activeTab === 'code' 
+                                        ? (finding as unknown as CodeQLFinding).message
+                                        : (finding as unknown as DependencyCheckFinding).description)
+                                    }
+                                  </div>
                                 </div>
                               </div>
                               
@@ -681,22 +727,16 @@ export default function Dashboard() {
                                 <div className="flex items-center gap-2 mb-2">
                                   <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
                                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                                    {finding.llm_exploitability.toLowerCase().includes('high') ? 'Exploitable' : 'Not Exploitable'}
+                                    {getExploitabilityText(finding.llm_exploitability)}
                                   </span>
                                 </div>
                                 <div className="relative">
-                                  <p className={`text-gray-300 ${!expandedCards[`${index}-exploitability`] ? 'line-clamp-3' : ''}`}>
-                                    {finding.llm_exploitability}
-                                  </p>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      toggleCard(index, 'exploitability')
-                                    }}
-                                    className="text-blue-400 hover:text-blue-300 text-sm mt-2"
+                                  <div 
+                                    id={`${index}-exploitability-content`}
+                                    className="text-gray-300"
                                   >
-                                    {expandedCards[`${index}-exploitability`] ? 'Show Less' : 'Show More'}
-                                  </button>
+                                    {finding.llm_exploitability}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -705,18 +745,12 @@ export default function Dashboard() {
                             <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                               <h4 className="text-lg font-medium text-gray-200 mb-3">Data Flow</h4>
                               <div className="relative">
-                                <p className={`text-gray-300 whitespace-pre-wrap ${!expandedCards[`${index}-dataflow`] ? 'line-clamp-3' : ''}`}>
-                                  {finding.analysis?.dataFlow || "No data flow information available"}
-                                </p>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    toggleCard(index, 'dataflow')
-                                  }}
-                                  className="text-blue-400 hover:text-blue-300 text-sm mt-2"
+                                <div 
+                                  id={`${index}-dataflow-content`}
+                                  className="text-gray-300 whitespace-pre-wrap"
                                 >
-                                  {expandedCards[`${index}-dataflow`] ? 'Show Less' : 'Show More'}
-                                </button>
+                                  {finding.analysis?.dataFlow || "No data flow information available"}
+                                </div>
                               </div>
                             </div>
 
@@ -725,20 +759,16 @@ export default function Dashboard() {
                               <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                                 <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
                                 <div className="relative">
-                                  <ul className={`list-disc list-inside space-y-2 ${!expandedCards[`${index}-recommendations`] ? 'line-clamp-3' : ''}`}>
-                                    {finding.analysis.recommendations.map((rec, idx) => (
-                                      <li key={idx} className="text-gray-300">{rec}</li>
-                                    ))}
-                                  </ul>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      toggleCard(index, 'recommendations')
-                                    }}
-                                    className="text-blue-400 hover:text-blue-300 text-sm mt-2"
+                                  <div 
+                                    id={`${index}-recommendations-content`}
+                                    className="space-y-2"
                                   >
-                                    {expandedCards[`${index}-recommendations`] ? 'Show Less' : 'Show More'}
-                                  </button>
+                                    <ul className="list-disc list-inside space-y-2">
+                                      {finding.analysis.recommendations.map((rec, idx) => (
+                                        <li key={idx} className="text-gray-300">{rec}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
                                 </div>
                               </div>
                             )}
@@ -829,31 +859,16 @@ export default function Dashboard() {
                               <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                                 <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
                                 <div className="relative">
-                                  <p className={`text-gray-300 ${!expandedCards[`${index}-description`] ? 'line-clamp-3' : ''}`}>
-                                    {finding.analysis?.description || finding.message}
-                                  </p>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      toggleCard(index, 'description')
-                                    }}
-                                    className="text-blue-400 hover:text-blue-300 text-sm mt-2 flex items-center gap-1.5 group transition-all duration-200 relative"
+                                  <div 
+                                    id={`${index}-description-content`}
+                                    className="text-gray-300"
                                   >
-                                    <span>{expandedCards[`${index}-description`] ? 'Show Less' : 'Show More'}</span>
-                                    <svg 
-                                      className={`w-4 h-4 transform transition-transform duration-200 ${
-                                        expandedCards[`${index}-description`] ? 'rotate-180' : ''
-                                      }`} 
-                                      fill="none" 
-                                      viewBox="0 0 24 24" 
-                                      stroke="currentColor"
-                                    >
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                    {!expandedCards[`${index}-description`] && (
-                                      <div className="absolute bottom-full left-0 w-full h-8 bg-gradient-to-t from-gray-800/50 to-transparent pointer-events-none"></div>
-                                    )}
-                                  </button>
+                                    {finding.analysis?.description || 
+                                      (activeTab === 'code' 
+                                        ? (finding as unknown as CodeQLFinding).message
+                                        : (finding as unknown as DependencyCheckFinding).description)
+                                    }
+                                  </div>
                                 </div>
                               </div>
                               
@@ -861,22 +876,16 @@ export default function Dashboard() {
                                 <div className="flex items-center gap-2 mb-2">
                                   <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
                                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                                    {finding.llm_exploitability.toLowerCase().includes('high') ? 'Exploitable' : 'Not Exploitable'}
+                                    {getExploitabilityText(finding.llm_exploitability)}
                                   </span>
                                 </div>
                                 <div className="relative">
-                                  <p className={`text-gray-300 ${!expandedCards[`${index}-exploitability`] ? 'line-clamp-3' : ''}`}>
-                                    {finding.llm_exploitability}
-                                  </p>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      toggleCard(index, 'exploitability')
-                                    }}
-                                    className="text-blue-400 hover:text-blue-300 text-sm mt-2"
+                                  <div 
+                                    id={`${index}-exploitability-content`}
+                                    className="text-gray-300"
                                   >
-                                    {expandedCards[`${index}-exploitability`] ? 'Show Less' : 'Show More'}
-                                  </button>
+                                    {finding.llm_exploitability}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -885,18 +894,12 @@ export default function Dashboard() {
                             <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                               <h4 className="text-lg font-medium text-gray-200 mb-3">Data Flow</h4>
                               <div className="relative">
-                                <p className={`text-gray-300 whitespace-pre-wrap ${!expandedCards[`${index}-dataflow`] ? 'line-clamp-3' : ''}`}>
-                                  {finding.analysis?.dataFlow || "No data flow information available"}
-                                </p>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    toggleCard(index, 'dataflow')
-                                  }}
-                                  className="text-blue-400 hover:text-blue-300 text-sm mt-2"
+                                <div 
+                                  id={`${index}-dataflow-content`}
+                                  className="text-gray-300 whitespace-pre-wrap"
                                 >
-                                  {expandedCards[`${index}-dataflow`] ? 'Show Less' : 'Show More'}
-                                </button>
+                                  {finding.analysis?.dataFlow || "No data flow information available"}
+                                </div>
                               </div>
                             </div>
 
@@ -905,20 +908,16 @@ export default function Dashboard() {
                               <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
                                 <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
                                 <div className="relative">
-                                  <ul className={`list-disc list-inside space-y-2 ${!expandedCards[`${index}-recommendations`] ? 'line-clamp-3' : ''}`}>
-                                    {finding.analysis.recommendations.map((rec, idx) => (
-                                      <li key={idx} className="text-gray-300">{rec}</li>
-                                    ))}
-                                  </ul>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      toggleCard(index, 'recommendations')
-                                    }}
-                                    className="text-blue-400 hover:text-blue-300 text-sm mt-2"
+                                  <div 
+                                    id={`${index}-recommendations-content`}
+                                    className="space-y-2"
                                   >
-                                    {expandedCards[`${index}-recommendations`] ? 'Show Less' : 'Show More'}
-                                  </button>
+                                    <ul className="list-disc list-inside space-y-2">
+                                      {finding.analysis.recommendations.map((rec, idx) => (
+                                        <li key={idx} className="text-gray-300">{rec}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
                                 </div>
                               </div>
                             )}
