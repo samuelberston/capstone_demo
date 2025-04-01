@@ -382,8 +382,8 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
             
             logger.info(f"Vulnerability summary: {vuln_counts['HIGH']} High, {vuln_counts['MEDIUM']} Medium, {vuln_counts['LOW']} Low")
               
-        # Add LLM reasoning to dependency findings
-        if 'results' in results:
+        # Add LLM reasoning to dependency findings and save to database
+        if 'results' in results and session and scan_id:
             dependencies = results.get('results', {}).get('dependencies', [])
             if dependencies:
                 logger.info(f"Enhancing dependency findings with LLM reasoning")
@@ -394,6 +394,29 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
                         try:
                             # Use the dependency analysis agent to analyze each vulnerable dependency
                             analysis_result = dep_agent.analyze(dependency)
+                            
+                            # Create DependencyCheckFinding records for each vulnerability
+                            for vuln in dependency.get('vulnerabilities', []):
+                                finding = DependencyCheckFinding(
+                                    scan_id=scan_id,
+                                    dependency_name=dependency.get('fileName', ''),
+                                    dependency_version=dependency.get('version', ''),
+                                    vulnerability_id=vuln.get('name', ''),
+                                    vulnerability_name=vuln.get('name', ''),
+                                    severity=vuln.get('severity', ''),
+                                    cvss_score=float(vuln.get('cvssv3', {}).get('baseScore', 0)),
+                                    description=vuln.get('description', ''),
+                                    llm_exploitability=analysis_result.get('analysis', {}).get('exploitability', ''),
+                                    llm_priority=analysis_result.get('analysis', {}).get('priority', ''),
+                                    raw_data={
+                                        'analysis': analysis_result.get('analysis', {}),
+                                        'usage_patterns': analysis_result.get('context', {}).get('usage', {}),
+                                        'exploitability': analysis_result.get('context', {}).get('exploitability', {})
+                                    }
+                                )
+                                session.add(finding)
+                            session.commit()
+                            
                             if 'error' in analysis_result:
                                 logger.error(f"Error in dependency analysis: {analysis_result['error']}")
                                 dependency['llm_analysis'] = {"error": analysis_result['error']}
@@ -415,6 +438,7 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
                 scan.progress_percentage = 90
+                scan.dependency_status = 'completed'  # Update status to completed
                 session.commit()
 
         if 'success' in results and results['success']:
@@ -432,14 +456,16 @@ def run_dependency_check(repo_path, session=None, scan_id=None):
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
                 scan.status = 'failed'
+                scan.dependency_status = 'failed'  # Update status to failed
                 scan.error_message = f'Dependency-Check analysis failed: {str(e)}'
                 session.commit()
-        return {'error': f'DeWpendency-Check analysis failed: {str(e)}'}
+        return {'error': f'Dependency-Check analysis failed: {str(e)}'}
     except Exception as e:
         if session and scan_id:
             scan = session.query(Scan).filter_by(id=scan_id).first()
             if scan:
                 scan.status = 'failed'
+                scan.dependency_status = 'failed'  # Update status to failed
                 scan.error_message = f'Dependency-Check processing failed: {str(e)}'
                 session.commit()
         return {'error': f'Dependency-Check processing failed: {str(e)}'}
