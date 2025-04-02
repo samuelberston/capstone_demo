@@ -39,6 +39,31 @@ const dummyData: Scan[] = [{
   })),
   dependency_findings: [
     {
+      id: 1,
+      scan_id: 1,
+      dependency_name: "express-jwt",
+      dependency_version: "0.1.3",
+      vulnerability_id: "CVE-2020-15084",
+      vulnerability_name: "Authorization Bypass in express-jwt",
+      severity: "CRITICAL",
+      cvss_score: 9.1,
+      description: "In express-jwt (NPM package) up and including version 5.3.3, the algorithms entry to be specified in the configuration is not being enforced. When algorithms is not specified in the configuration, with the combination of jwks-rsa, it may lead to authorization bypass.",
+      llm_exploitability: "High - The vulnerability allows attackers to bypass authorization checks when using jwks-rsa as the secret without proper algorithm validation.",
+      llm_priority: "Critical",
+      code_context: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});",
+      analysis: {
+        description: "The vulnerability exists in the express-jwt middleware where it fails to enforce algorithm validation when using jwks-rsa as the secret. This can lead to authorization bypass attacks.",
+        dataFlow: "The vulnerability occurs in the JWT verification process where the algorithms parameter is not enforced. This allows attackers to potentially bypass authorization by using different signing algorithms than intended.",
+        recommendations: [
+          "Specify algorithms in the express-jwt configuration",
+          "Update to version 6.0.0 or later",
+          "Use proper algorithm validation with jwks-rsa",
+          "Implement proper error handling for invalid tokens"
+        ],
+        vulnerableCode: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});"
+      }
+    },
+    {
       id: 2,
       scan_id: 1,
       dependency_name: "lodash",
@@ -282,6 +307,13 @@ export default function Dashboard() {
     });
   };
 
+  // Sorting function for dependency findings by CVSS score (descending)
+  const sortByCVSS = (findings: any[]): any[] => {
+    return [...findings].sort((a, b) => {
+      return (b.cvss_score || 0) - (a.cvss_score || 0);
+    });
+  };
+
   const getVerificationColor = (verification: string | null | undefined): string => {
     if (!verification) return 'bg-yellow-500/15 text-yellow-500'
     if (verification.toLowerCase().includes('true positive')) return 'bg-green-500/15 text-green-500'
@@ -390,11 +422,11 @@ export default function Dashboard() {
     }
   };
 
-  // CodeQL findings display with sorting
+  // CodeQL findings display with sorting by priority
   const sortedCodeQLFindings = selectedScan ? sortByPriority(selectedScan.codeql_findings || []) : [];
 
-  // Dependency findings display with sorting
-  const sortedDependencyFindings = selectedScan ? sortByPriority(selectedScan.dependency_findings || []) : [];
+  // Dependency findings display with sorting by CVSS score
+  const sortedDependencyFindings = selectedScan ? sortByCVSS(selectedScan.dependency_findings || []) : [];
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
