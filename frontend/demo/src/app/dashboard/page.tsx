@@ -39,31 +39,6 @@ const dummyData: Scan[] = [{
   })),
   dependency_findings: [
     {
-      id: 1,
-      scan_id: 1,
-      dependency_name: "express-jwt",
-      dependency_version: "0.1.3",
-      vulnerability_id: "CVE-2020-15084",
-      vulnerability_name: "Authorization Bypass in express-jwt",
-      severity: "CRITICAL",
-      cvss_score: 9.1,
-      description: "In express-jwt (NPM package) up and including version 5.3.3, the algorithms entry to be specified in the configuration is not being enforced. When algorithms is not specified in the configuration, with the combination of jwks-rsa, it may lead to authorization bypass.",
-      llm_exploitability: "High - The vulnerability allows attackers to bypass authorization checks when using jwks-rsa as the secret without proper algorithm validation.",
-      llm_priority: "Critical",
-      code_context: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});",
-      analysis: {
-        description: "The vulnerability exists in the express-jwt middleware where it fails to enforce algorithm validation when using jwks-rsa as the secret. This can lead to authorization bypass attacks.",
-        dataFlow: "The vulnerability occurs in the JWT verification process where the algorithms parameter is not enforced. This allows attackers to potentially bypass authorization by using different signing algorithms than intended.",
-        recommendations: [
-          "Specify algorithms in the express-jwt configuration",
-          "Update to version 6.0.0 or later",
-          "Use proper algorithm validation with jwks-rsa",
-          "Implement proper error handling for invalid tokens"
-        ],
-        vulnerableCode: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});"
-      }
-    },
-    {
       id: 2,
       scan_id: 1,
       dependency_name: "lodash",
@@ -179,7 +154,7 @@ function isDependencyCheckFinding(finding: any): finding is DependencyCheckFindi
 }
 
 // Description rendering helper for any finding type
-function getDescription(finding: CodeQLFinding | DependencyCheckFinding): string {
+function getDescription(finding: any): string {
   if (finding.analysis?.description) {
     return finding.analysis.description;
   }
@@ -195,15 +170,19 @@ function getDescription(finding: CodeQLFinding | DependencyCheckFinding): string
   return "No description available";
 }
 
-// Sorting function for priority
-function sortByPriority(findings: (CodeQLFinding | DependencyCheckFinding)[]): (CodeQLFinding | DependencyCheckFinding)[] {
-  return [...findings].sort((a, b) => {
-    const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
-    const aPriority = getPriorityLevel(a.llm_priority || '');
-    const bPriority = getPriorityLevel(b.llm_priority || '');
-    
-    return priorityOrder[aPriority] - priorityOrder[bPriority];
-  });
+// Normalize rule IDs to readable names
+function normalizeRuleId(ruleId: string): string {
+  // Remove language prefix (js/, py/, java/, etc.)
+  const namePart = ruleId.split('/').pop() || ruleId;
+  
+  // Convert hyphens and underscores to spaces
+  const spacedName = namePart.replace(/[-_]/g, ' ');
+  
+  // Capitalize each word
+  return spacedName
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 export default function Dashboard() {
@@ -291,6 +270,17 @@ export default function Dashboard() {
     if (priority.toLowerCase().includes('critical')) return 'Critical'
     return 'Medium'
   }
+
+  // Sorting function for priority - now inside the component to access getPriorityLevel
+  const sortByPriority = (findings: any[]): any[] => {
+    return [...findings].sort((a, b) => {
+      const priorityOrder: Record<string, number> = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
+      const aPriority = getPriorityLevel(a.llm_priority || '');
+      const bPriority = getPriorityLevel(b.llm_priority || '');
+      
+      return (priorityOrder[aPriority] || 99) - (priorityOrder[bPriority] || 99);
+    });
+  };
 
   const getVerificationColor = (verification: string | null | undefined): string => {
     if (!verification) return 'bg-yellow-500/15 text-yellow-500'
@@ -400,10 +390,10 @@ export default function Dashboard() {
     }
   };
 
-  // Add this for CodeQL findings display
+  // CodeQL findings display with sorting
   const sortedCodeQLFindings = selectedScan ? sortByPriority(selectedScan.codeql_findings || []) : [];
 
-  // Add this for Dependency findings display
+  // Dependency findings display with sorting
   const sortedDependencyFindings = selectedScan ? sortByPriority(selectedScan.dependency_findings || []) : [];
 
   return (
@@ -711,7 +701,7 @@ export default function Dashboard() {
                         onClick={() => handleFindingClick(index)}
                       >
                         <div className="col-span-4 p-4">
-                          <div className="font-medium text-white">{finding.rule_id}</div>
+                          <div className="font-medium text-white">{normalizeRuleId(finding.rule_id)}</div>
                           <div className="text-gray-400 truncate max-w-xs">{finding.message}</div>
                         </div>
                         <div className="col-span-3 p-4 font-mono text-gray-400">
