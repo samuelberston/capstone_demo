@@ -51,6 +51,7 @@ const dummyData: Scan[] = [{
       llm_exploitability: "High - The vulnerability allows attackers to bypass authorization checks when using jwks-rsa as the secret without proper algorithm validation.",
       llm_priority: "Critical",
       code_context: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});",
+      affected_files: ["lib/insecurity.ts", "routes/verify.ts", "routes/rest.ts"],
       analysis: {
         description: "The vulnerability exists in the express-jwt middleware where it fails to enforce algorithm validation when using jwks-rsa as the secret. This can lead to authorization bypass attacks.",
         dataFlow: "The vulnerability occurs in the JWT verification process where the algorithms parameter is not enforced. This allows attackers to potentially bypass authorization by using different signing algorithms than intended.",
@@ -76,6 +77,7 @@ const dummyData: Scan[] = [{
       llm_exploitability: "High - Attackers can pollute the Object prototype, potentially leading to denial of service or remote code execution.",
       llm_priority: "High",
       code_context: "const _ = require('lodash');\n\n// Vulnerable code\nconst userInput = JSON.parse(req.body);\nconst config = _.merge({}, userInput);\n\n// This could pollute Object.prototype\nconst result = _.defaultsDeep({}, userInput);",
+      affected_files: ["lib/utils.js", "routes/profile.js", "models/user.js"],
       analysis: {
         description: "The vulnerability exists in lodash's merge functions where it fails to properly validate input objects, allowing prototype pollution attacks.",
         dataFlow: "The vulnerability occurs when user-controlled input is passed to lodash's merge functions without proper validation. The merge operation can modify Object.prototype if the input contains specially crafted properties.",
@@ -767,7 +769,14 @@ export default function Dashboard() {
                           <div className="grid grid-cols-1 gap-6">
                             {/* Vulnerable Code Section */}
                             <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <h4 className="text-lg font-medium text-gray-200 mb-3">Vulnerable Code</h4>
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-lg font-medium text-gray-200">Vulnerable Code</h4>
+                                {isDependencyCheckFinding(finding) && (finding as any).affected_files && (
+                                  <div className="font-mono text-sm text-gray-400">
+                                    {(finding as any).affected_files.join(', ')}
+                                  </div>
+                                )}
+                              </div>
                               <pre className="bg-black p-4 rounded-lg overflow-x-auto">
                                 <code className="text-sm font-mono text-gray-300">
                                   {finding.code_context || finding.analysis?.vulnerableCode || "No code context available"}
@@ -830,7 +839,7 @@ export default function Dashboard() {
                                     className="space-y-2"
                                   >
                                     <ul className="list-disc list-inside space-y-2">
-                                      {finding.analysis.recommendations.map((rec, idx) => (
+                                      {finding.analysis.recommendations.map((rec: string, idx: number) => (
                                         <li key={idx} className="text-gray-300">{rec}</li>
                                       ))}
                                     </ul>
@@ -912,7 +921,14 @@ export default function Dashboard() {
                           <div className="grid grid-cols-1 gap-6">
                             {/* Vulnerable Code Section */}
                             <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                              <h4 className="text-lg font-medium text-gray-200 mb-3">Vulnerable Code</h4>
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-lg font-medium text-gray-200">Vulnerable Code</h4>
+                                {isDependencyCheckFinding(finding) && (finding as any).affected_files && (
+                                  <div className="font-mono text-sm text-gray-400">
+                                    {(finding as any).affected_files.join(', ')}
+                                  </div>
+                                )}
+                              </div>
                               <pre className="bg-black p-4 rounded-lg overflow-x-auto">
                                 <code className="text-sm font-mono text-gray-300">
                                   {finding.code_context || finding.analysis?.vulnerableCode || "No code context available"}
@@ -975,7 +991,7 @@ export default function Dashboard() {
                                     className="space-y-2"
                                   >
                                     <ul className="list-disc list-inside space-y-2">
-                                      {finding.analysis.recommendations.map((rec, idx) => (
+                                      {finding.analysis.recommendations.map((rec: string, idx: number) => (
                                         <li key={idx} className="text-gray-300">{rec}</li>
                                       ))}
                                     </ul>
