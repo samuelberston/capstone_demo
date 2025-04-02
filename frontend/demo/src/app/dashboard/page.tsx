@@ -25,9 +25,9 @@ const dummyData: Scan[] = [{
     message: finding.message,
     file_path: finding.location,
     start_line: finding.raw_finding.locations?.[0]?.physicalLocation?.region?.startLine || 0,
-    llm_verification: finding.analysis.description,
-    llm_exploitability: finding.analysis.impact,
-    llm_priority: "High priority",
+    llm_verification: finding.llm_verification || "",
+    llm_exploitability: finding.llm_exploitability || "",
+    llm_priority: finding.llm_priority || "High priority",
     code_context: finding.code_context || finding.analysis.vulnerableCode || "No code context available",
     analysis: {
       description: finding.analysis.description,
@@ -168,6 +168,44 @@ const getScanStatus = (scan: Scan) => {
   return scan.status;
 };
 
+// At the top of the file after imports, add these type guards:
+
+function isCodeQLFinding(finding: any): finding is CodeQLFinding {
+  return finding && 'rule_id' in finding && 'message' in finding;
+}
+
+function isDependencyCheckFinding(finding: any): finding is DependencyCheckFinding {
+  return finding && 'dependency_name' in finding && 'vulnerability_id' in finding;
+}
+
+// Description rendering helper for any finding type
+function getDescription(finding: CodeQLFinding | DependencyCheckFinding): string {
+  if (finding.analysis?.description) {
+    return finding.analysis.description;
+  }
+  
+  if (isCodeQLFinding(finding)) {
+    return finding.message;
+  }
+  
+  if (isDependencyCheckFinding(finding)) {
+    return finding.description;
+  }
+  
+  return "No description available";
+}
+
+// Sorting function for priority
+function sortByPriority(findings: (CodeQLFinding | DependencyCheckFinding)[]): (CodeQLFinding | DependencyCheckFinding)[] {
+  return [...findings].sort((a, b) => {
+    const priorityOrder = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
+    const aPriority = getPriorityLevel(a.llm_priority || '');
+    const bPriority = getPriorityLevel(b.llm_priority || '');
+    
+    return priorityOrder[aPriority] - priorityOrder[bPriority];
+  });
+}
+
 export default function Dashboard() {
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -256,29 +294,33 @@ export default function Dashboard() {
 
   const getVerificationColor = (verification: string | null | undefined): string => {
     if (!verification) return 'bg-yellow-500/15 text-yellow-500'
-    if (verification.toLowerCase().includes('true')) return 'bg-green-500/15 text-green-500'
-    if (verification.toLowerCase().includes('false')) return 'bg-red-500/15 text-red-500'
+    if (verification.toLowerCase().includes('true positive')) return 'bg-green-500/15 text-green-500'
+    if (verification.toLowerCase().includes('false positive')) return 'bg-red-500/15 text-red-500'
     return 'bg-yellow-500/15 text-yellow-500'
   }
 
-  const getExploitabilityColor = (exploitability: string): string => {
-    if (exploitability.toLowerCase().includes('high')) return 'bg-red-500/15 text-red-500'
-    if (exploitability.toLowerCase().includes('medium')) return 'bg-yellow-500/15 text-yellow-500'
-    if (exploitability.toLowerCase().includes('low')) return 'bg-blue-500/15 text-blue-500'
+  const getExploitabilityColor = (exploitability: string | null | undefined): string => {
+    if (!exploitability) return 'bg-gray-500/15 text-gray-500'
+    const lowerExploitability = exploitability.toLowerCase()
+    if (lowerExploitability.includes('not exploitable')) return 'bg-blue-500/15 text-blue-500'
+    if (lowerExploitability.includes('partially')) return 'bg-yellow-500/15 text-yellow-500'
+    if (lowerExploitability.includes('exploitable')) return 'bg-red-500/15 text-red-500'
     return 'bg-gray-500/15 text-gray-500'
   }
 
   const getVerificationText = (verification: string | null | undefined): string => {
     if (!verification) return 'Unknown'
-    if (verification.toLowerCase().includes('true')) return 'True Positive'
-    if (verification.toLowerCase().includes('false')) return 'False Positive'
+    if (verification.toLowerCase().includes('true positive')) return 'True Positive'
+    if (verification.toLowerCase().includes('false positive')) return 'False Positive'
     return 'Unknown'
   }
 
-  const getExploitabilityText = (exploitability: string): string => {
-    if (exploitability.toLowerCase().includes('high')) return 'Exploitable'
-    if (exploitability.toLowerCase().includes('medium')) return 'Partially Exploitable'
-    if (exploitability.toLowerCase().includes('low')) return 'Not Exploitable'
+  const getExploitabilityText = (exploitability: string | null | undefined): string => {
+    if (!exploitability) return 'Unknown'
+    const lowerExploitability = exploitability.toLowerCase()
+    if (lowerExploitability.includes('not exploitable')) return 'Not Exploitable'
+    if (lowerExploitability.includes('partially')) return 'Partially Exploitable'
+    if (lowerExploitability.includes('exploitable')) return 'Exploitable'
     return 'Unknown'
   }
 
@@ -292,7 +334,7 @@ export default function Dashboard() {
     
     try {
       // Make the API call
-      const newScan = await startScanRequest(newScanData.repositoryUrl);
+      await startScanRequest(newScanData.repositoryUrl);
       
       // Immediately fetch and update scans to show the new one
       const fetchedScans = await fetchScans();
@@ -357,6 +399,12 @@ export default function Dashboard() {
       console.error('Error clearing scans:', error);
     }
   };
+
+  // Add this for CodeQL findings display
+  const sortedCodeQLFindings = selectedScan ? sortByPriority(selectedScan.codeql_findings || []) : [];
+
+  // Add this for Dependency findings display
+  const sortedDependencyFindings = selectedScan ? sortByPriority(selectedScan.dependency_findings || []) : [];
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -655,7 +703,7 @@ export default function Dashboard() {
                 
                 {/* Table Rows */}
                 <div className="divide-y divide-gray-700">
-                  {(selectedScan.codeql_findings || []).map((finding, index) => (
+                  {sortedCodeQLFindings.map((finding, index) => (
                     <div key={index}>
                       {/* Row */}
                       <div 
@@ -714,11 +762,7 @@ export default function Dashboard() {
                                     id={`${index}-description-content`}
                                     className="text-gray-300"
                                   >
-                                    {finding.analysis?.description || 
-                                      (activeTab === 'code' 
-                                        ? (finding as unknown as CodeQLFinding).message
-                                        : (finding as unknown as DependencyCheckFinding).description)
-                                    }
+                                    {getDescription(finding)}
                                   </div>
                                 </div>
                               </div>
@@ -794,7 +838,7 @@ export default function Dashboard() {
                 
                 {/* Table Rows */}
                 <div className="divide-y divide-gray-700">
-                  {(selectedScan.dependency_findings || []).map((finding, index) => (
+                  {sortedDependencyFindings.map((finding, index) => (
                     <div key={index}>
                       {/* Row */}
                       <div 
@@ -863,11 +907,7 @@ export default function Dashboard() {
                                     id={`${index}-description-content`}
                                     className="text-gray-300"
                                   >
-                                    {finding.analysis?.description || 
-                                      (activeTab === 'code' 
-                                        ? (finding as unknown as CodeQLFinding).message
-                                        : (finding as unknown as DependencyCheckFinding).description)
-                                    }
+                                    {getDescription(finding)}
                                   </div>
                                 </div>
                               </div>
