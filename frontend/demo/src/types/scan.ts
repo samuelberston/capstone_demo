@@ -75,6 +75,7 @@ export interface DependencyCheckFinding {
   llm_exploitability: string;
   llm_priority: string;
   code_context?: string;
+  affected_files?: string[];
   analysis: {
     description: string;
     dataFlow?: string;

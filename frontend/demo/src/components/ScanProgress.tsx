@@ -1,5 +1,4 @@
 import { Scan } from '@/types/scan';
-import { formatDistanceToNow } from 'date-fns';
 
 interface ScanProgressProps {
   scan: Scan;
