@@ -72,13 +72,21 @@ def detect_all_languages(repo_path):
 
 def get_query_suite_path(language: str) -> str:
     """Get the path to the CodeQL query suite for the given language."""
-    # For JavaScript, use the security queries from the installed package
     if language == "javascript":
-        return "/Users/samuelberston/.codeql/packages/codeql/javascript-queries/1.4.0/Security/CWE-089/SqlInjection.ql"
+        # Use the standard security and quality suite for JavaScript
+        return "javascript-security-and-quality.qls" 
     elif language == "python":
-        return "/Users/samuelberston/.codeql/packages/codeql/python-queries/1.4.0/Security/CWE-089/SqlInjection.ql"
+        # Use the standard security and quality suite for Python
+        return "python-security-and-quality.qls"
+    # Add cases for other languages (java, csharp, etc.)
+    # elif language == "java":
+    #     return "java-security-extended.qls" 
     else:
-        raise ValueError(f"Unsupported language: {language}")
+        # Maybe default to a basic suite or raise an error
+        logger.warning(f"No specific security suite defined for language: {language}. Consider adding one.")
+        # Returning a basic query pack path might be a fallback
+        # return "codeql/quick-query" # Example, adjust as needed
+        raise ValueError(f"Unsupported language or no suite defined: {language}")
 
 def get_cache_key(repo_path, language):
     """Generate a unique cache key based on repo path and language."""
@@ -142,15 +150,21 @@ def run_codeql_analysis(repo_path: str, language: str) -> Dict[str, Any]:
             )
             logger.info("CodeQL database created successfully")
             
-            # Get query suite path
-            query_suite = get_query_suite_path(language)
-            logger.info(f"Using query suite: {query_suite}")
-            
+            # Determine the query or suite to run
+            query_target = ""
+            if language == "javascript":
+                query_target = "codeql/javascript-queries"
+                logger.info(f"Using standard JavaScript query pack: {query_target}")
+            else:
+                # Fallback to using the suite path for other languages
+                query_target = get_query_suite_path(language)
+                logger.info(f"Using query suite path: {query_target}")
+
             # Run CodeQL analysis
             analyze_cmd = [
                 "codeql", "database", "analyze",
                 db_path,
-                query_suite,
+                query_target,  # Use the determined query target
                 "--format=sarif-latest",
                 "--output=" + results_path
             ]
