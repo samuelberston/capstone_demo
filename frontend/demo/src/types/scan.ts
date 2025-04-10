@@ -49,7 +49,7 @@ export interface CodeQLFinding {
   fingerprint?: string;
   llm_verification: string;
   llm_exploitability: string;
-  llm_remediation?: string;
+  llm_remediation?: string | null;
   llm_priority: string;
   code_context?: string;
   analysis?: {
@@ -79,6 +79,7 @@ export interface DependencyCheckFinding {
   analysis: {
     description: string;
     dataFlow?: string;
+    impact?: string;
     recommendations: string[];
     vulnerableCode?: string;
   };

@@ -12,3 +12,7 @@ node_modules/
 __pycache__/
 juice-shop-critical-findings.json
 juice-shop/
+juice-shop-db/
+juice-shop-results.sarif
+depcheck/
+data/

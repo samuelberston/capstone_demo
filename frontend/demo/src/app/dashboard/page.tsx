@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { Toaster, toast } from 'react-hot-toast'
-import criticalFindings from './juice-shop-critical-findings.json'
-import { Scan } from '@/types/scan'
+import frontendReadyCodeQLFindings from '../../../../../frontend_ready_findings.json' // Use correct JSON
+import { Scan, CodeQLFinding, DependencyCheckFinding } from '@/types/scan'
 import { ScanProgress } from '@/components/ScanProgress'
-import { CodeQLFinding, DependencyCheckFinding } from '@/types/scan'
 
 // Convert the JSON findings into the expected Scan format
 const dummyData: Scan[] = [{
@@ -18,79 +17,8 @@ const dummyData: Scan[] = [{
   codeql_status: "completed",
   dependency_status: "completed",
   progress_percentage: 100,
-  codeql_findings: criticalFindings.results.map(finding => ({
-    id: 1,
-    scan_id: 1,
-    rule_id: finding.ruleId,
-    message: finding.message,
-    file_path: finding.location,
-    start_line: finding.raw_finding.locations?.[0]?.physicalLocation?.region?.startLine || 0,
-    llm_verification: finding.llm_verification || "",
-    llm_exploitability: finding.llm_exploitability || "",
-    llm_priority: finding.llm_priority || "High priority",
-    code_context: finding.code_context || finding.analysis.vulnerableCode || "No code context available",
-    analysis: {
-      description: finding.analysis.description,
-      dataFlow: finding.analysis.dataFlow,
-      impact: finding.analysis.impact,
-      recommendations: finding.analysis.recommendations,
-      vulnerableCode: finding.analysis.vulnerableCode || finding.code_context || "No vulnerable code available"
-    }
-  })),
-  dependency_findings: [
-    {
-      id: 1,
-      scan_id: 1,
-      dependency_name: "express-jwt",
-      dependency_version: "0.1.3",
-      vulnerability_id: "CVE-2020-15084",
-      vulnerability_name: "Authorization Bypass in express-jwt",
-      severity: "CRITICAL",
-      cvss_score: 9.1,
-      description: "In express-jwt (NPM package) up and including version 5.3.3, the algorithms entry to be specified in the configuration is not being enforced. When algorithms is not specified in the configuration, with the combination of jwks-rsa, it may lead to authorization bypass.",
-      llm_exploitability: "High - The vulnerability allows attackers to bypass authorization checks when using jwks-rsa as the secret without proper algorithm validation.",
-      llm_priority: "Critical",
-      code_context: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});",
-      affected_files: ["lib/insecurity.ts", "routes/verify.ts", "routes/rest.ts"],
-      analysis: {
-        description: "The vulnerability exists in the express-jwt middleware where it fails to enforce algorithm validation when using jwks-rsa as the secret. This can lead to authorization bypass attacks.",
-        dataFlow: "The vulnerability occurs in the JWT verification process where the algorithms parameter is not enforced. This allows attackers to potentially bypass authorization by using different signing algorithms than intended.",
-        recommendations: [
-          "Specify algorithms in the express-jwt configuration",
-          "Update to version 6.0.0 or later",
-          "Use proper algorithm validation with jwks-rsa",
-          "Implement proper error handling for invalid tokens"
-        ],
-        vulnerableCode: "const checkJwt = jwt({\n  secret: jwksRsa.expressJwtSecret({\n    rateLimit: true,\n    jwksRequestsPerMinute: 5,\n    jwksUri: `https://${DOMAIN}/.well-known/jwks.json`\n  }),\n  // Missing algorithms configuration\n  audience: process.env.AUDIENCE,\n  issuer: `https://${DOMAIN}/`\n});"
-      }
-    },
-    {
-      id: 2,
-      scan_id: 1,
-      dependency_name: "lodash",
-      dependency_version: "4.17.15",
-      vulnerability_id: "CVE-2019-10744",
-      vulnerability_name: "Prototype Pollution in lodash",
-      severity: "HIGH",
-      cvss_score: 7.5,
-      description: "A vulnerability was found in lodash where the merge, mergeWith, and defaultsDeep functions could be tricked into adding or modifying properties of Object.prototype.",
-      llm_exploitability: "High - Attackers can pollute the Object prototype, potentially leading to denial of service or remote code execution.",
-      llm_priority: "High",
-      code_context: "const _ = require('lodash');\n\n// Vulnerable code\nconst userInput = JSON.parse(req.body);\nconst config = _.merge({}, userInput);\n\n// This could pollute Object.prototype\nconst result = _.defaultsDeep({}, userInput);",
-      affected_files: ["lib/utils.js", "routes/profile.js", "models/user.js"],
-      analysis: {
-        description: "The vulnerability exists in lodash's merge functions where it fails to properly validate input objects, allowing prototype pollution attacks.",
-        dataFlow: "The vulnerability occurs when user-controlled input is passed to lodash's merge functions without proper validation. The merge operation can modify Object.prototype if the input contains specially crafted properties.",
-        recommendations: [
-          "Update to version 4.17.16 or later",
-          "Use Object.freeze() to prevent prototype modification",
-          "Implement proper input validation",
-          "Consider using alternative libraries with better security"
-        ],
-        vulnerableCode: "const _ = require('lodash');\n\n// Vulnerable code\nconst userInput = JSON.parse(req.body);\nconst config = _.merge({}, userInput);\n\n// This could pollute Object.prototype\nconst result = _.defaultsDeep({}, userInput);"
-      }
-    }
-  ]
+  codeql_findings: frontendReadyCodeQLFindings as unknown as CodeQLFinding[], // Use JSON, correct cast
+  dependency_findings: [] // Remove hardcoded dependency data
 }]
 
 const API_BASE = 'http://localhost:5001';
@@ -212,11 +140,13 @@ function normalizeRuleId(ruleId: string): string {
     .join(' ');
 }
 
+const ITEMS_PER_PAGE = 10;
+
 export default function Dashboard() {
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'code' | 'dependency'>('code')
-  const [expandedFinding, setExpandedFinding] = useState<number | null>(null)
+  const [expandedFindingId, setExpandedFindingId] = useState<number | null>(null) // Use ID for pagination
   const [newScanData, setNewScanData] = useState({
     repositoryUrl: '',
     agents: {
@@ -227,6 +157,8 @@ export default function Dashboard() {
   const [isMounted, setIsMounted] = useState(false)
   const [scans, setScans] = useState<Scan[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [codeQLCurrentPage, setCodeQLCurrentPage] = useState(1); // Pagination state
+  const [dependencyCurrentPage, setDependencyCurrentPage] = useState(1); // Pagination state
   
   useEffect(() => {
     setIsMounted(true)
@@ -290,22 +222,25 @@ export default function Dashboard() {
     }, 2000);
   };
 
-  const getPriorityLevel = (priority: string): string => {
-    if (priority.toLowerCase().includes('high')) return 'High'
-    if (priority.toLowerCase().includes('medium')) return 'Medium'
-    if (priority.toLowerCase().includes('low')) return 'Low'
-    if (priority.toLowerCase().includes('critical')) return 'Critical'
-    return 'Medium'
+  // Updated Priority logic
+  const getPriorityLevel = (priority: string | null | undefined): string => {
+    if (!priority) return 'Low'; // Default null/undefined to Low
+    const lowerPriority = priority.toLowerCase();
+    // Check in order of importance
+    if (lowerPriority.includes('critical')) return 'Critical';
+    if (lowerPriority.includes('high')) return 'High';
+    if (lowerPriority.includes('medium')) return 'Medium';
+    if (lowerPriority.includes('low')) return 'Low';
+    return 'Low'; // Default any unrecognized string to Low
   }
 
-  // Sorting function for priority - now inside the component to access getPriorityLevel
+  // Sorting function for priority - uses updated getPriorityLevel
   const sortByPriority = (findings: CodeQLFinding[]): CodeQLFinding[] => {
     return [...findings].sort((a, b) => {
       const priorityOrder: Record<string, number> = { 'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3 };
-      const aPriority = getPriorityLevel(a.llm_priority || '');
-      const bPriority = getPriorityLevel(b.llm_priority || '');
-      
-      return (priorityOrder[aPriority] || 99) - (priorityOrder[bPriority] || 99);
+      const aPriority = getPriorityLevel(a.llm_priority);
+      const bPriority = getPriorityLevel(b.llm_priority);
+      return priorityOrder[aPriority] - priorityOrder[bPriority];
     });
   };
 
@@ -316,36 +251,52 @@ export default function Dashboard() {
     });
   };
 
+  // Updated Verification logic
   const getVerificationColor = (verification: string | null | undefined): string => {
-    if (!verification) return 'bg-yellow-500/15 text-yellow-500'
-    if (verification.toLowerCase().includes('true positive')) return 'bg-green-500/15 text-green-500'
-    if (verification.toLowerCase().includes('false positive')) return 'bg-red-500/15 text-red-500'
-    return 'bg-yellow-500/15 text-yellow-500'
-  }
-
-  const getExploitabilityColor = (exploitability: string | null | undefined): string => {
-    if (!exploitability) return 'bg-gray-500/15 text-gray-500'
-    const lowerExploitability = exploitability.toLowerCase()
-    if (lowerExploitability.includes('not exploitable')) return 'bg-blue-500/15 text-blue-500'
-    if (lowerExploitability.includes('partially')) return 'bg-yellow-500/15 text-yellow-500'
-    if (lowerExploitability.includes('exploitable')) return 'bg-red-500/15 text-red-500'
-    return 'bg-gray-500/15 text-gray-500'
+    if (!verification) return 'bg-red-500/15 text-red-500' // Default Unknown to False Positive color
+    const lowerVerification = verification.toLowerCase();
+    if (lowerVerification.includes('true positive') || lowerVerification.includes('verified')) return 'bg-green-500/15 text-green-500' 
+    if (lowerVerification.includes('false positive')) return 'bg-red-500/15 text-red-500'
+    return 'bg-red-500/15 text-red-500' // Default unrecognized to False Positive color
   }
 
   const getVerificationText = (verification: string | null | undefined): string => {
-    if (!verification) return 'Unknown'
-    if (verification.toLowerCase().includes('true positive')) return 'True Positive'
-    if (verification.toLowerCase().includes('false positive')) return 'False Positive'
-    return 'Unknown'
+    if (!verification) return 'False Positive' // Default Unknown to False Positive
+    const lowerVerification = verification.toLowerCase();
+    if (lowerVerification.includes('true positive') || lowerVerification.includes('verified')) return 'True Positive' 
+    if (lowerVerification.includes('false positive')) return 'False Positive'
+    return 'False Positive' // Default unrecognized to False Positive
   }
 
-  const getExploitabilityText = (exploitability: string | null | undefined): string => {
-    if (!exploitability) return 'Unknown'
+  // Updated Exploitability logic (depends on verification)
+  const getExploitabilityColor = (
+    exploitability: string | null | undefined,
+    verificationStatus: string // Added verificationStatus parameter
+  ): string => {
+    // If False Positive, always treat as Not Exploitable (blue)
+    if (verificationStatus === 'False Positive') return 'bg-blue-500/15 text-blue-500';
+    
+    if (!exploitability) return 'bg-blue-500/15 text-blue-500' // Default null/undefined to Not Exploitable color
+    const lowerExploitability = exploitability.toLowerCase()
+    if (lowerExploitability.includes('not exploitable')) return 'bg-blue-500/15 text-blue-500'
+    if (lowerExploitability.includes('partially')) return 'bg-yellow-500/15 text-yellow-500'
+    if (lowerExploitability.includes('exploitable') || lowerExploitability.includes('high')) return 'bg-red-500/15 text-red-500' 
+    return 'bg-blue-500/15 text-blue-500' // Default unrecognized to Not Exploitable color
+  }
+
+  const getExploitabilityText = (
+    exploitability: string | null | undefined,
+    verificationStatus: string // Added verificationStatus parameter
+  ): string => {
+    // If False Positive, always treat as Not Exploitable
+    if (verificationStatus === 'False Positive') return 'Not Exploitable';
+
+    if (!exploitability) return 'Not Exploitable' // Default null/undefined to Not Exploitable
     const lowerExploitability = exploitability.toLowerCase()
     if (lowerExploitability.includes('not exploitable')) return 'Not Exploitable'
     if (lowerExploitability.includes('partially')) return 'Partially Exploitable'
-    if (lowerExploitability.includes('exploitable')) return 'Exploitable'
-    return 'Unknown'
+    if (lowerExploitability.includes('exploitable') || lowerExploitability.includes('high')) return 'Exploitable' 
+    return 'Not Exploitable' // Default unrecognized to Not Exploitable
   }
 
   const handleScanClick = (scan: Scan) => {
@@ -395,8 +346,9 @@ export default function Dashboard() {
     }
   }
 
-  const handleFindingClick = (index: number) => {
-    setExpandedFinding(prev => prev === index ? null : index);
+  // Updated finding click handler for pagination
+  const handleFindingClick = (findingId: number) => { 
+    setExpandedFindingId(prev => prev === findingId ? null : findingId);
   }
 
   const formatDate = (dateString: string) => {
@@ -428,21 +380,18 @@ export default function Dashboard() {
   const calculateVerificationStats = (findings: CodeQLFinding[]): {label: string, count: number, color: string}[] => {
     const stats = {
       'True Positive': 0,
-      'False Positive': 0,
-      'Unknown': 0
+      'False Positive': 0
     };
     
     findings.forEach(finding => {
       const verification = getVerificationText(finding.llm_verification);
       if (verification === 'True Positive') stats['True Positive']++;
-      else if (verification === 'False Positive') stats['False Positive']++;
-      else stats['Unknown']++;
+      else stats['False Positive']++; // Default is False Positive
     });
     
     return [
       { label: 'True Positive', count: stats['True Positive'], color: 'bg-green-500' },
-      { label: 'False Positive', count: stats['False Positive'], color: 'bg-red-500' },
-      { label: 'Unknown', count: stats['Unknown'], color: 'bg-yellow-500' }
+      { label: 'False Positive', count: stats['False Positive'], color: 'bg-red-500' }
     ];
   };
   
@@ -450,23 +399,23 @@ export default function Dashboard() {
     const stats = {
       'Exploitable': 0,
       'Partially Exploitable': 0,
-      'Not Exploitable': 0,
-      'Unknown': 0
+      'Not Exploitable': 0
     };
     
     findings.forEach(finding => {
-      const exploitability = getExploitabilityText(finding.llm_exploitability);
+      const verification = getVerificationText(finding.llm_verification); // Get verification status first
+      // Pass verification status to getExploitabilityText
+      const exploitability = getExploitabilityText(finding.llm_exploitability, verification); 
+      
       if (exploitability === 'Exploitable') stats['Exploitable']++;
       else if (exploitability === 'Partially Exploitable') stats['Partially Exploitable']++;
-      else if (exploitability === 'Not Exploitable') stats['Not Exploitable']++;
-      else stats['Unknown']++;
+      else stats['Not Exploitable']++; // All others (including False Positives) count as Not Exploitable
     });
     
     return [
       { label: 'Exploitable', count: stats['Exploitable'], color: 'bg-red-500' },
       { label: 'Partially Exploitable', count: stats['Partially Exploitable'], color: 'bg-yellow-500' },
-      { label: 'Not Exploitable', count: stats['Not Exploitable'], color: 'bg-blue-500' },
-      { label: 'Unknown', count: stats['Unknown'], color: 'bg-gray-500' }
+      { label: 'Not Exploitable', count: stats['Not Exploitable'], color: 'bg-blue-500' }
     ];
   };
   
@@ -479,7 +428,7 @@ export default function Dashboard() {
     };
     
     findings.forEach(finding => {
-      const priority = getPriorityLevel(finding.llm_priority || '');
+      const priority = getPriorityLevel(finding.llm_priority);
       stats[priority as keyof typeof stats]++;
     });
     
@@ -561,17 +510,60 @@ export default function Dashboard() {
     );
   };
 
-  // CodeQL findings display with sorting by priority
-  const sortedCodeQLFindings = selectedScan ? sortByPriority(selectedScan.codeql_findings || []) : [];
+  // CodeQL findings pre-processing and sorting
+  const processedCodeQLFindings = (selectedScan?.codeql_findings || []).map(finding => {
+    const verification = getVerificationText(finding.llm_verification);
+    const originalPriority = getPriorityLevel(finding.llm_priority);
+
+    // Rule: If False Positive, downgrade Critical/High to Medium
+    if (verification === 'False Positive' && (originalPriority === 'Critical' || originalPriority === 'High')) {
+      return { ...finding, llm_priority: 'Medium' };
+    }
+    
+    return finding; // Keep original finding if no rule matches
+  });
+
+  const sortedCodeQLFindings = sortByPriority(processedCodeQLFindings); // Sort the processed findings
 
   // Dependency findings display with sorting by CVSS score
   const sortedDependencyFindings = selectedScan ? sortByCVSS(selectedScan.dependency_findings || []) : [];
 
-  // Calculate stats for charts
-  const verificationStats = selectedScan ? calculateVerificationStats(selectedScan.codeql_findings || []) : [];
-  const exploitabilityStats = selectedScan ? calculateExploitabilityStats(selectedScan.codeql_findings || []) : [];
-  const priorityStats = selectedScan ? calculatePriorityStats(selectedScan.codeql_findings || []) : [];
-  const severityStats = selectedScan ? calculateSeverityStats(selectedScan.dependency_findings || []) : [];
+  // --- Pagination Logic ---
+  // CodeQL Pagination
+  const totalCodeQLPages = Math.ceil(sortedCodeQLFindings.length / ITEMS_PER_PAGE);
+  const codeQLStartIndex = (codeQLCurrentPage - 1) * ITEMS_PER_PAGE;
+  const codeQLEndIndex = codeQLStartIndex + ITEMS_PER_PAGE;
+  const paginatedCodeQLFindings = sortedCodeQLFindings.slice(codeQLStartIndex, codeQLEndIndex);
+
+  const handleCodeQLPrev = () => setCodeQLCurrentPage(prev => Math.max(prev - 1, 1));
+  const handleCodeQLNext = () => setCodeQLCurrentPage(prev => Math.min(prev + 1, totalCodeQLPages));
+
+  // Dependency Pagination
+  const totalDependencyPages = Math.ceil(sortedDependencyFindings.length / ITEMS_PER_PAGE);
+  const dependencyStartIndex = (dependencyCurrentPage - 1) * ITEMS_PER_PAGE;
+  const dependencyEndIndex = dependencyStartIndex + ITEMS_PER_PAGE;
+  const paginatedDependencyFindings = sortedDependencyFindings.slice(dependencyStartIndex, dependencyEndIndex);
+
+  const handleDependencyPrev = () => setDependencyCurrentPage(prev => Math.max(prev - 1, 1));
+  const handleDependencyNext = () => setDependencyCurrentPage(prev => Math.min(prev + 1, totalDependencyPages));
+  // --- End Pagination Logic ---
+
+  // Calculate stats for charts (Use processed and sorted arrays)
+  const verificationStats = selectedScan ? calculateVerificationStats(processedCodeQLFindings) : [];
+  const exploitabilityStats = selectedScan ? calculateExploitabilityStats(processedCodeQLFindings) : []; 
+  const priorityStats = selectedScan ? calculatePriorityStats(processedCodeQLFindings) : []; // Use processed findings for priority stats
+  const severityStats = selectedScan ? calculateSeverityStats(sortedDependencyFindings) : [];
+
+  // Reset page number when scan selection changes or tab changes
+  useEffect(() => {
+    setCodeQLCurrentPage(1);
+    setDependencyCurrentPage(1);
+    setExpandedFindingId(null); // Close expanded finding when scan changes
+  }, [selectedScan]);
+
+  useEffect(() => {
+    setExpandedFindingId(null); // Close expanded finding when tab changes
+  }, [activeTab]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -890,137 +882,184 @@ export default function Dashboard() {
                   
                   {/* Table Rows */}
                   <div className="divide-y divide-gray-700">
-                    {sortedCodeQLFindings.map((finding, index) => (
-                      <div key={index}>
-                        {/* Row */}
-                        <div 
-                          className="grid grid-cols-12 text-sm hover:bg-gray-800/50 cursor-pointer transition-colors"
-                          onClick={() => handleFindingClick(index)}
-                        >
-                          <div className="col-span-4 p-4">
-                            <div className="font-medium text-white">{normalizeRuleId(finding.rule_id)}</div>
-                            <div className="text-gray-400 truncate max-w-xs">{finding.message}</div>
-                          </div>
-                          <div className="col-span-3 p-4 font-mono text-gray-400">
-                            {finding.file_path}:{finding.start_line}
-                          </div>
-                          <div className="col-span-2 p-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getVerificationColor(finding.llm_verification)}`}>
-                              {getVerificationText(finding.llm_verification)}
-                            </span>
-                          </div>
-                          <div className="col-span-2 p-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                              {getExploitabilityText(finding.llm_exploitability)}
-                            </span>
-                          </div>
-                          <div className="col-span-1 p-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              getPriorityLevel(finding.llm_priority) === 'Critical' ? 'bg-red-500/15 text-red-500' : 
-                              getPriorityLevel(finding.llm_priority) === 'High' ? 'bg-red-500/15 text-red-500' : 
-                              getPriorityLevel(finding.llm_priority) === 'Medium' ? 'bg-yellow-500/15 text-yellow-500' : 
-                              'bg-blue-500/15 text-blue-500'
-                            }`}>
-                              {getPriorityLevel(finding.llm_priority)}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        {/* Expanded Details */}
-                        {expandedFinding === index && (
-                          <div className="p-6 bg-gray-800/30 border-t border-gray-700">
-                            <div className="grid grid-cols-1 gap-6">
-                              {/* Vulnerable Code Section */}
-                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h4 className="text-lg font-medium text-gray-200">Vulnerable Code</h4>
-                                  {isDependencyCheckFinding(finding) && finding.affected_files && (
-                                    <div className="font-mono text-sm text-gray-400">
-                                      {finding.affected_files.join(', ')}
-                                    </div>
-                                  )}
-                                </div>
-                                <pre className="bg-black p-4 rounded-lg overflow-x-auto">
-                                  <code className="text-sm font-mono text-gray-300">
-                                    {finding.code_context || finding.analysis?.vulnerableCode || "No code context available"}
-                                  </code>
-                                </pre>
-                              </div>
-
-                              {/* Analysis Grid - Moved after code */}
-                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                  <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
-                                  <div className="relative">
-                                    <div 
-                                      id={`${index}-description-content`}
-                                      className="text-gray-300"
-                                    >
-                                      {getDescription(finding)}
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
-                                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                                      {getExploitabilityText(finding.llm_exploitability)}
-                                    </span>
-                                  </div>
-                                  <div className="relative">
-                                    <div 
-                                      id={`${index}-exploitability-content`}
-                                      className="text-gray-300"
-                                    >
-                                      {finding.llm_exploitability}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Data Flow Section */}
-                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                <h4 className="text-lg font-medium text-gray-200 mb-3">Data Flow</h4>
-                                <div className="relative">
-                                  <div 
-                                    id={`${index}-dataflow-content`}
-                                    className="text-gray-300 whitespace-pre-wrap"
-                                  >
-                                    {finding.analysis?.dataFlow || "No data flow information available"}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Recommendations Section */}
-                              {finding.analysis?.recommendations && (
-                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                  <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
-                                  <div className="relative">
-                                    <div 
-                                      id={`${index}-recommendations-content`}
-                                      className="space-y-2"
-                                    >
-                                      <ul className="list-disc list-inside space-y-2">
-                                        {finding.analysis.recommendations.map((rec, idx) => (
-                                          <li key={idx} className="text-gray-300">{rec}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
+                    {paginatedCodeQLFindings.map((finding) => { // Use braces for block scope
+                      // Calculate verification status once for reuse
+                      const verificationStatus = getVerificationText(finding.llm_verification);
+                      
+                      return (
+                        <div key={finding.id}>
+                          {/* Row */}
+                          <div 
+                            className="grid grid-cols-12 text-sm hover:bg-gray-800/50 cursor-pointer transition-colors"
+                            onClick={() => handleFindingClick(finding.id)}
+                          >
+                            <div className="col-span-4 p-4">
+                              <div className="font-medium text-white">{normalizeRuleId(finding.rule_id)}</div>
+                              <div className="text-gray-400 truncate max-w-xs">{finding.message}</div>
+                            </div>
+                            <div className="col-span-3 p-4 font-mono text-gray-400">
+                              {finding.file_path}:{finding.start_line}
+                            </div>
+                            <div className="col-span-2 p-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getVerificationColor(finding.llm_verification)}`}>
+                                {verificationStatus} {/* Use calculated status */}
+                              </span>
+                            </div>
+                            <div className="col-span-2 p-4">
+                              {/* Pass verificationStatus to exploitability helpers */}
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getExploitabilityColor(finding.llm_exploitability, verificationStatus)}`}> 
+                                {getExploitabilityText(finding.llm_exploitability, verificationStatus)} 
+                              </span>
+                            </div>
+                            <div className="col-span-1 p-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                getPriorityLevel(finding.llm_priority) === 'Critical' ? 'bg-red-500/15 text-red-500' : 
+                                getPriorityLevel(finding.llm_priority) === 'High' ? 'bg-red-500/15 text-red-500' : 
+                                getPriorityLevel(finding.llm_priority) === 'Medium' ? 'bg-yellow-500/15 text-yellow-500' : 
+                                'bg-blue-500/15 text-blue-500'
+                              }`}>
+                                {getPriorityLevel(finding.llm_priority)}
+                              </span>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          
+                          {/* Expanded Details */}
+                          {expandedFindingId === finding.id && (
+                            <div className="p-6 bg-gray-800/30 border-t border-gray-700">
+                              <div className="grid grid-cols-1 gap-6">
+                                {/* Vulnerable Code Section */}
+                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-lg font-medium text-gray-200">Vulnerable Code</h4>
+                                    {isDependencyCheckFinding(finding) && finding.affected_files && (
+                                      <div className="font-mono text-sm text-gray-400">
+                                        {finding.affected_files.join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <pre className="bg-black p-4 rounded-lg overflow-x-auto">
+                                    <code className="text-sm font-mono text-gray-300">
+                                      {finding.code_context || finding.analysis?.vulnerableCode || "No code context available"}
+                                    </code>
+                                  </pre>
+                                </div>
+
+                                {/* Analysis Grid - Moved after code */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                  <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                    <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
+                                    <div className="relative">
+                                      <div 
+                                        id={`${finding.id}-description-content`}
+                                        className="text-gray-300"
+                                      >
+                                        {getDescription(finding)}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
+                                      {/* Pass verificationStatus here too */}
+                                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability, verificationStatus)}`}> 
+                                        {getExploitabilityText(finding.llm_exploitability, verificationStatus)} 
+                                      </span>
+                                    </div>
+                                    <div className="relative">
+                                      <div 
+                                        id={`${finding.id}-exploitability-content`}
+                                        className="text-gray-300 whitespace-pre-wrap"
+                                      >
+                                        {finding.analysis?.impact || "No impact information available"}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Data Flow Section */}
+                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                  <h4 className="text-lg font-medium text-gray-200 mb-3">Data Flow</h4>
+                                  <div className="relative">
+                                    <div 
+                                      id={`${finding.id}-dataflow-content`}
+                                      className="text-gray-300 whitespace-pre-wrap"
+                                    >
+                                      {finding.analysis?.dataFlow || "No data flow information available"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Recommendations Section */}
+                                {finding.analysis?.recommendations && (
+                                  <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                    <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
+                                    <div className="relative">
+                                      <div 
+                                        id={`${finding.id}-recommendations-content`}
+                                        className="space-y-2"
+                                      >
+                                        <ul className="list-disc list-inside space-y-2">
+                                          {finding.analysis.recommendations.map((rec, idx) => (
+                                            <li key={idx} className="text-gray-300">{rec}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
+                  {/* Pagination Controls - CodeQL */} 
+                  {totalCodeQLPages > 1 && (
+                    <div className="flex items-center justify-between p-4 bg-gray-800/50 border-t border-gray-700">
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setCodeQLCurrentPage(1)} // Go to first page
+                          disabled={codeQLCurrentPage === 1}
+                          className="px-4 py-2 text-sm font-medium text-white bg-gray-600 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          First
+                        </button>
+                        <button 
+                          onClick={handleCodeQLPrev}
+                          disabled={codeQLCurrentPage === 1}
+                          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Previous
+                        </button>
+                      </div>
+                      <span className="text-sm text-gray-400">
+                        Page {codeQLCurrentPage} of {totalCodeQLPages}
+                      </span>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={handleCodeQLNext}
+                          disabled={codeQLCurrentPage === totalCodeQLPages}
+                          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Next
+                        </button>
+                        <button 
+                          onClick={() => setCodeQLCurrentPage(totalCodeQLPages)} // Go to last page
+                          disabled={codeQLCurrentPage === totalCodeQLPages}
+                          className="px-4 py-2 text-sm font-medium text-white bg-gray-600 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Last
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
 
-            {activeTab === 'dependency' && (
+            {(activeTab as string) === 'dependency' && (
               <>
                 {/* Stats Charts */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -1029,11 +1068,12 @@ export default function Dashboard() {
                     title="Severity" 
                   />
                   <BarChart 
-                    data={calculateExploitabilityStats(selectedScan?.dependency_findings as unknown as CodeQLFinding[] || [])}
+                    // Pass dependency findings to calculateExploitabilityStats
+                    data={calculateExploitabilityStats(sortedDependencyFindings as unknown as CodeQLFinding[] || [])} 
                     title="Exploitability" 
                   />
                   <BarChart 
-                    data={calculatePriorityStats(selectedScan?.dependency_findings as unknown as CodeQLFinding[] || [])} 
+                    data={calculatePriorityStats(sortedDependencyFindings as unknown as CodeQLFinding[])} 
                     title="Priority Level" 
                   />
                 </div>
@@ -1050,142 +1090,187 @@ export default function Dashboard() {
                   
                   {/* Table Rows */}
                   <div className="divide-y divide-gray-700">
-                    {sortedDependencyFindings.map((finding, index) => (
-                      <div key={index}>
-                        {/* Row */}
-                        <div 
-                          className="grid grid-cols-12 text-sm hover:bg-gray-800/50 cursor-pointer transition-colors"
-                          onClick={() => handleFindingClick(index)}
-                        >
-                          <div className="col-span-4 p-4">
-                            <div className="font-medium text-white">{finding.vulnerability_name}</div>
-                            <div className="text-gray-400">{finding.vulnerability_id}</div>
-                          </div>
-                          <div className="col-span-3 p-4 font-mono text-gray-400">
-                            {finding.dependency_name}@{finding.dependency_version}
-                          </div>
-                          <div className="col-span-2 p-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              finding.severity === 'CRITICAL' ? 'bg-red-500/15 text-red-500' :
-                              finding.severity === 'HIGH' ? 'bg-red-500/15 text-red-500' :
-                              finding.severity === 'MEDIUM' ? 'bg-yellow-500/15 text-yellow-500' :
-                              'bg-blue-500/15 text-blue-500'
-                            }`}>
-                              {finding.severity}
-                            </span>
-                          </div>
-                          <div className="col-span-2 p-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              finding.cvss_score >= 9.0 ? 'bg-red-500/15 text-red-500' :
-                              finding.cvss_score >= 7.0 ? 'bg-red-500/15 text-red-500' :
-                              finding.cvss_score >= 4.0 ? 'bg-yellow-500/15 text-yellow-500' :
-                              'bg-blue-500/15 text-blue-500'
-                            }`}>
-                              {finding.cvss_score}
-                            </span>
-                          </div>
-                          <div className="col-span-1 p-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              getPriorityLevel(finding.llm_priority) === 'Critical' ? 'bg-red-500/15 text-red-500' : 
-                              getPriorityLevel(finding.llm_priority) === 'High' ? 'bg-red-500/15 text-red-500' : 
-                              getPriorityLevel(finding.llm_priority) === 'Medium' ? 'bg-yellow-500/15 text-yellow-500' : 
-                              'bg-blue-500/15 text-blue-500'
-                            }`}>
-                              {getPriorityLevel(finding.llm_priority)}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        {/* Expanded Details */}
-                        {expandedFinding === index && (
-                          <div className="p-6 bg-gray-800/30 border-t border-gray-700">
-                            <div className="grid grid-cols-1 gap-6">
-                              {/* Vulnerable Code Section */}
-                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h4 className="text-lg font-medium text-gray-200">Vulnerable Code</h4>
-                                  {isDependencyCheckFinding(finding) && finding.affected_files && (
-                                    <div className="font-mono text-sm text-gray-400">
-                                      {finding.affected_files.join(', ')}
-                                    </div>
-                                  )}
-                                </div>
-                                <pre className="bg-black p-4 rounded-lg overflow-x-auto">
-                                  <code className="text-sm font-mono text-gray-300">
-                                    {finding.code_context || finding.analysis?.vulnerableCode || "No code context available"}
-                                  </code>
-                                </pre>
-                              </div>
-
-                              {/* Analysis Grid - Moved after code */}
-                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                  <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
-                                  <div className="relative">
-                                    <div 
-                                      id={`${index}-description-content`}
-                                      className="text-gray-300"
-                                    >
-                                      {getDescription(finding)}
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
-                                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability)}`}>
-                                      {getExploitabilityText(finding.llm_exploitability)}
-                                    </span>
-                                  </div>
-                                  <div className="relative">
-                                    <div 
-                                      id={`${index}-exploitability-content`}
-                                      className="text-gray-300"
-                                    >
-                                      {finding.llm_exploitability}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Data Flow Section */}
-                              <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                <h4 className="text-lg font-medium text-gray-200 mb-3">Data Flow</h4>
-                                <div className="relative">
-                                  <div 
-                                    id={`${index}-dataflow-content`}
-                                    className="text-gray-300 whitespace-pre-wrap"
-                                  >
-                                    {finding.analysis?.dataFlow || "No data flow information available"}
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Recommendations Section */}
-                              {finding.analysis?.recommendations && (
-                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
-                                  <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
-                                  <div className="relative">
-                                    <div 
-                                      id={`${index}-recommendations-content`}
-                                      className="space-y-2"
-                                    >
-                                      <ul className="list-disc list-inside space-y-2">
-                                        {finding.analysis.recommendations.map((rec, idx) => (
-                                          <li key={idx} className="text-gray-300">{rec}</li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
+                    {paginatedDependencyFindings.map((finding) => { // Use braces for block scope
+                      // For dependencies, pass default 'True Positive' as verification status
+                      const defaultVerification = 'True Positive';
+                      return (
+                        <div key={finding.id}>
+                          {/* Row */}
+                          <div 
+                            className="grid grid-cols-12 text-sm hover:bg-gray-800/50 cursor-pointer transition-colors"
+                            onClick={() => handleFindingClick(finding.id)}
+                          >
+                            <div className="col-span-4 p-4">
+                              <div className="font-medium text-white">{finding.vulnerability_name}</div>
+                              <div className="text-gray-400">{finding.vulnerability_id}</div>
+                            </div>
+                            <div className="col-span-3 p-4 font-mono text-gray-400">
+                              {finding.dependency_name}@{finding.dependency_version}
+                            </div>
+                            <div className="col-span-2 p-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                finding.severity === 'CRITICAL' ? 'bg-red-500/15 text-red-500' :
+                                finding.severity === 'HIGH' ? 'bg-red-500/15 text-red-500' :
+                                finding.severity === 'MEDIUM' ? 'bg-yellow-500/15 text-yellow-500' :
+                                'bg-blue-500/15 text-blue-500'
+                              }`}>
+                                {finding.severity}
+                              </span>
+                            </div>
+                            <div className="col-span-2 p-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                finding.cvss_score >= 9.0 ? 'bg-red-500/15 text-red-500' :
+                                finding.cvss_score >= 7.0 ? 'bg-red-500/15 text-red-500' :
+                                finding.cvss_score >= 4.0 ? 'bg-yellow-500/15 text-yellow-500' :
+                                'bg-blue-500/15 text-blue-500'
+                              }`}>
+                                {finding.cvss_score}
+                              </span>
+                            </div>
+                            <div className="col-span-1 p-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                getPriorityLevel(finding.llm_priority) === 'Critical' ? 'bg-red-500/15 text-red-500' : 
+                                getPriorityLevel(finding.llm_priority) === 'High' ? 'bg-red-500/15 text-red-500' : 
+                                getPriorityLevel(finding.llm_priority) === 'Medium' ? 'bg-yellow-500/15 text-yellow-500' : 
+                                'bg-blue-500/15 text-blue-500'
+                              }`}>
+                                {getPriorityLevel(finding.llm_priority)}
+                              </span>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          
+                          {/* Expanded Details */}
+                          {expandedFindingId === finding.id && (
+                            <div className="p-6 bg-gray-800/30 border-t border-gray-700">
+                              <div className="grid grid-cols-1 gap-6">
+                                {/* Vulnerable Code Section */}
+                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-lg font-medium text-gray-200">Vulnerable Code</h4>
+                                    {isDependencyCheckFinding(finding) && finding.affected_files && (
+                                      <div className="font-mono text-sm text-gray-400">
+                                        {finding.affected_files.join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <pre className="bg-black p-4 rounded-lg overflow-x-auto">
+                                    <code className="text-sm font-mono text-gray-300">
+                                      {finding.code_context || finding.analysis?.vulnerableCode || "No code context available"}
+                                    </code>
+                                  </pre>
+                                </div>
+
+                                {/* Analysis Grid */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                  <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                    <h4 className="text-lg font-medium text-gray-200 mb-2">Description</h4>
+                                    <div className="relative">
+                                      <div 
+                                        id={`${finding.id}-description-content`}
+                                        className="text-gray-300"
+                                      >
+                                        {getDescription(finding)}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <h4 className="text-lg font-medium text-gray-200">Exploitability</h4>
+                                      {/* Corrected: Pass defaultVerification constant directly */}
+                                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${getExploitabilityColor(finding.llm_exploitability, defaultVerification)}`}>
+                                        {getExploitabilityText(finding.llm_exploitability, defaultVerification)}
+                                      </span>
+                                    </div>
+                                    <div className="relative">
+                                      <div 
+                                        id={`${finding.id}-exploitability-content`}
+                                        className="text-gray-300 whitespace-pre-wrap"
+                                      >
+                                        {finding.analysis?.impact || "No impact information available"}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Data Flow Section */}
+                                <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                  <h4 className="text-lg font-medium text-gray-200 mb-3">Data Flow</h4>
+                                  <div className="relative">
+                                    <div 
+                                      id={`${finding.id}-dataflow-content`}
+                                      className="text-gray-300 whitespace-pre-wrap"
+                                    >
+                                      {finding.analysis?.dataFlow || "No data flow information available"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Recommendations Section */}
+                                {finding.analysis?.recommendations && (
+                                  <div className="bg-gray-800/50 rounded-lg p-4 border border-gray-700">
+                                    <h4 className="text-lg font-medium text-gray-200 mb-3">Recommendations</h4>
+                                    <div className="relative">
+                                      <div 
+                                        id={`${finding.id}-recommendations-content`}
+                                        className="space-y-2"
+                                      >
+                                        <ul className="list-disc list-inside space-y-2">
+                                          {finding.analysis.recommendations.map((rec, idx) => (
+                                            <li key={idx} className="text-gray-300">{rec}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
+                  {/* Pagination Controls - Dependency */}
+                  {totalDependencyPages > 1 && (
+                    <div className="flex items-center justify-between p-4 bg-gray-800/50 border-t border-gray-700">
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setDependencyCurrentPage(1)} // Go to first page
+                          disabled={dependencyCurrentPage === 1}
+                          className="px-4 py-2 text-sm font-medium text-white bg-gray-600 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          First
+                        </button>
+                        <button 
+                          onClick={handleDependencyPrev}
+                          disabled={dependencyCurrentPage === 1}
+                          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Previous
+                        </button>
+                      </div>
+                      <span className="text-sm text-gray-400">
+                        Page {dependencyCurrentPage} of {totalDependencyPages}
+                      </span>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={handleDependencyNext}
+                          disabled={dependencyCurrentPage === totalDependencyPages}
+                          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Next
+                        </button>
+                        <button 
+                          onClick={() => setDependencyCurrentPage(totalDependencyPages)} // Go to last page
+                          disabled={dependencyCurrentPage === totalDependencyPages}
+                          className="px-4 py-2 text-sm font-medium text-white bg-gray-600 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Last
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
